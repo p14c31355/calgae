@@ -1,23 +1,34 @@
 # `AGENT.md`
 
 > **Project Goal**
-> Build a **lightweight, safe, high-speed LLM runtime and model stack** using modern safe systems languages (MoonBit, Zig, Lean4, Rust).
-> Prioritize: **minimum compute resource usage**, **quantization + distillation**, **portable runtimes (WASM, native)**, and **formal verification of correctness (Lean4)**.
+> Build a **lightweight, safe, high-speed LLM runtime and model stack** using modern safe systems languages (Mojo, Codon, Zig, Lean4, Rust).
+> Prioritize: **minimum compute resource usage**, **quantization + distillation**, **portable runtimes (native, specialized backends)**, and **formal verification of correctness (Lean4)**.
 
 ---
 
 ## 1. Language & Toolchain Choices
 
-### 🌙 MoonBitLang
+### 🔥 Mojo
 
-* Official: [https://moonbitlang.com](https://moonbitlang.com)
-* GitHub: [https://github.com/moonbitlang](https://github.com/moonbitlang)
+* Official: [https://www.modular.com/mojo](https://www.modular.com/mojo)
+* GitHub: (Modular provides the official toolchain)
 * Key points:
 
-  * Compiles to **WebAssembly**.
-  * **Small runtime footprint**.
-  * Suitable for **edge inference** + browser-side LLM execution.
-  * Already exploring **AI-native compilation** ideas.
+  * Combines **Python's usability** with **C's performance**.
+  * Excellent for **AI/ML acceleration** and vector-heavy operations.
+  * Designed for **hardware-native performance** on specialized accelerators.
+
+---
+
+### ⚡ Codon
+
+* Official: [https://codon.com](https://codon.com)
+* GitHub: [https://github.com/exaloop/codon](https://github.com/exaloop/codon)
+* Key points:
+
+  * High-performance, **compiled Python dialect**.
+  * Focus on generating **highly optimized native code**.
+  * Suitable for creating **minimal, fast LLM inference binaries**.
 
 ---
 
@@ -141,15 +152,10 @@
 
   * Repo: [https://github.com/tracel-ai/burn](https://github.com/tracel-ai/burn)
 
-### WebAssembly runtimes
+### High-Performance Python Backends
 
-* **MoonBit → WASM** pipeline.
-* **WASI-NN**
-
-  * Spec: [https://github.com/WebAssembly/wasi-nn](https://github.com/WebAssembly/wasi-nn)
-* **WasmEdge AI**
-
-  * Repo: [https://github.com/WasmEdge/WasmEdge](https://github.com/WasmEdge/WasmEdge)
+* **Mojo** for accelerated inference kernels.
+* **Codon** for highly optimized, self-contained native execution.
 
 ---
 
@@ -181,10 +187,11 @@
 * Experiment with **Any-precision scheduling**.
 * Apply **LoRA / QLoRA** finetunes for specific tasks.
 * Add Zig kernels for **SIMD-heavy ops**.
+* Port critical, performance-sensitive logic to **Mojo or Codon** for native speed.
 
 ### Phase C: Runtime Engineering
 
-* Port critical ops to **MoonBit (WASM)**.
+* Build high-speed inference/pre/post-processing components in **Mojo/Codon**.
 * Formalize + verify quantization correctness in **Lean4**.
 * Build **Rust orchestrator** (agent system, I/O pipelines).
 
@@ -198,7 +205,7 @@
 Agents should be:
 
 * Event-driven (Rust async).
-* Extensible with MoonBit (WASM plugin).
+* Extensible with **Mojo/Codon** for specialized, accelerated components.
 * Verifiable logic (Lean4 proofs).
 
 ---
@@ -235,13 +242,13 @@ Agents should be:
 
 * [ ] Build Rust orchestrator.
 * [ ] Add Zig kernels for matmul.
-* [ ] Deploy MoonBit WASM inference.
+* [ ] Deploy accelerated components in **Mojo/Codon**.
 
 ### 🎯 Long-term
 
 * [ ] Formalize quantization correctness in Lean4.
-* [ ] Create unified agent runtime with plugin system.
-* [ ] Publish `light-llm-agent` stack (Rust + Zig + MoonBit + Lean4).
+* [ ] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
+* [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Codon + Lean4).
 
 ---
 
@@ -249,7 +256,7 @@ Agents should be:
 
 This project combines:
 
-* **MoonBit** → portable + safe WASM runtime.
+* **Mojo/Codon** → performance acceleration, hardware-native execution.
 * **Zig** → bare-metal performance for core kernels.
 * **Lean4** → formal proofs of correctness.
 * **Rust** → ecosystem glue + async agent orchestration.
@@ -257,4 +264,3 @@ This project combines:
 By stacking **quantization + distillation + runtime engineering**, we can achieve a **resource-minimal, formally safe LLM agent runtime**.
 
 ---
-
