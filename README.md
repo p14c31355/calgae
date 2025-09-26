@@ -56,7 +56,7 @@ pip install codon
 
 ### Other dependencies
 ```bash
-sudo apt update && sudo apt install cmake build-essential git wget curl python3-pip python3.12-venv && source ~/.cargo/env
+sudo apt update && sudo apt install cmake build-essential git wget curl python3-pip python3.12-venv
 ```
 
 ## Setup
