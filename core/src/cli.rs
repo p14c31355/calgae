@@ -10,8 +10,8 @@ pub struct Args {
     pub tokens: usize,
 
     #[arg(long, help = "Path to the llama-cli binary")]
-    pub llama_bin: String,
+    pub llama_bin: std::path::PathBuf,
 
     #[arg(long, help = "Path to the GGUF model file")]
-    pub model: String,
+    pub model: std::path::PathBuf,
 }
