@@ -1,6 +1,6 @@
 pub mod agent;
-pub mod inference;
 pub mod cli;
+pub mod inference;
 
-pub use agent::{run_agent, Agent};
+pub use agent::{Agent, run_agent};
 pub use inference::LlmInference;
