@@ -1,4 +1,4 @@
-use calgae_core::{run_agent, cli::Args};
+use calgae_core::{cli::Args, run_agent};
 use clap::Parser;
 
 const ALGAE_ART: &str = "\n                                 ,---.\n                                /   ,     ,-~^\"#\n                                \\   \\      /  \\\n                                 '---^--^    ^---^ \nCalgae: Lightweight LLM Runtime\n\"Write code for me\" and press Enter for assistance.\n";
