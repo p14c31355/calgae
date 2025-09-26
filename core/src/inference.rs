@@ -9,7 +9,9 @@ pub enum InferenceError {
 impl std::fmt::Display for InferenceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            InferenceError::CommandFailed(err) => write!(f, "LLM inference command failed: {}", err),
+            InferenceError::CommandFailed(err) => {
+                write!(f, "LLM inference command failed: {}", err)
+            }
             InferenceError::Utf8Error(err) => write!(f, "Invalid UTF-8 in output: {}", err),
         }
     }
@@ -47,11 +49,15 @@ impl LlmInference {
             .map_err(|e| InferenceError::CommandFailed(format!("Failed to run command: {}", e)))?;
 
         if output.status.success() {
-            String::from_utf8(output.stdout).map_err(InferenceError::Utf8Error)
+            String::from_utf8(output.stdout)
+                .map_err(InferenceError::Utf8Error)
                 .map(|s| s.trim().to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(InferenceError::CommandFailed(format!("LLM inference failed: {}", stderr)))
+            Err(InferenceError::CommandFailed(format!(
+                "LLM inference failed: {}",
+                stderr
+            )))
         }
     }
 }
