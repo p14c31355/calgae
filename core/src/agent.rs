@@ -1,5 +1,6 @@
 use super::cli::Args;
 use super::inference::{LlmInference, InferenceError};
+use once_cell::sync::Lazy;
 use regex::Regex;
 
 pub struct Agent {
@@ -48,19 +49,18 @@ impl Agent {
 
         let response = self.inference.infer(&enhanced_prompt, args.tokens)?;
 
-        // Robust extraction of Rust code block using regex
-        let re = Regex::new(r#"```rust\s*(.*?)\s*```"#).unwrap();
-        let code = re.captures(&response)
+        // Robust extraction of code block using lazy-compiled regexes
+        static RUST_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?s)```rust\s*(.*?)```"#).unwrap());
+        static ANY_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?s)```(?:\w+)?\s*(.*?)```"#).unwrap());
+
+        let code = RUST_CODE_BLOCK_RE.captures(&response)
             .and_then(|caps| caps.get(1))
+            .or_else(|| {
+                ANY_CODE_BLOCK_RE.captures(&response)
+                    .and_then(|caps| caps.get(1))
+            })
             .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_else(|| {
-                // Fallback: try extracting any code block
-                if let Some(caps) = Regex::new(r#"```(?:\w+)?\s*(.*?)\s*```"#).unwrap().captures(&response) {
-                    caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default()
-                } else {
-                    "".to_string()
-                }
-            });
+            .unwrap_or_default();
 
         if code.is_empty() {
             Ok(response)
@@ -71,7 +71,7 @@ impl Agent {
 }
 
 pub fn run_agent(args: &Args) -> Result<(), AgentError> {
-    let agent = Agent::new(args.llama_bin.clone(), args.model.clone());
+    let agent = Agent::new(&args.llama_bin, &args.model);
     let result = agent.generate_code(args)?;
     println!("{}", result);
     Ok(())
