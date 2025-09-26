@@ -121,7 +121,7 @@ To quantize other models, clone and follow AWQ repo instructions.
 # Download and install EdgeProfiler separately
 git clone https://github.com/ruoyuliu/EdgeProfiler.git ../edgeprofiler && cd ../edgeprofiler && pip install -r requirements.txt
 # Run benchmark
-python -m edgeprofiler.benchmark --model_path ../calgae/models/TinyLlama-1.1B-q4_0.gguf --backend llama.cpp
+python -m edgeprofiler.benchmark --model_path <path-to-calgae-repo>/models/TinyLlama-1.1B-q4_0.gguf --backend llama.cpp
 ```
 
 ### Next Steps
