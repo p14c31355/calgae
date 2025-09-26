@@ -9,7 +9,7 @@ pub struct Args {
     #[arg(short, long, default_value = "50")]
     pub tokens: usize,
 
-    #[arg(long, default_value = "../../engine/build/bin/llama-cli")]
+    #[arg(long, help = "Path to the llama-cli binary")]
     pub llama_bin: String,
 
     #[arg(long, default_value = "../../models/TinyLlama-1.1B-q4_0.gguf")]
