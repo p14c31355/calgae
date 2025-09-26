@@ -12,7 +12,7 @@ cd engine && mkdir -p build && cd build && cmake .. -DLLAMA_CURL=OFF && cmake --
 cd core && cargo build --release && cd ..
 
 # Build Zig runtime
-cd runtime && zig build
+(cd runtime && zig build)
 
 echo "Building Lean4 proof"
 (cd proof && lake build)
