@@ -18,14 +18,14 @@ impl Agent {
         let response = self.inference.infer(&enhanced_prompt, args.tokens)?;
         
         // Safe extraction of code block if present, fallback to full response
-        let start_idx = if let Some(pos) = response.find("```rust") { pos + 7 } else { 0 };
-        let end_idx = if let Some(pos) = response.rfind("```") { pos } else { response.len() };
-        let code_start = start_idx.min(response.len());
-        let code = if code_start < response.len() {
-            &response[code_start..min(end_idx, response.len())]
+        let code = if let Some(start) = response.find("```rust") {
+            let start = start + "```rust".len();
+            let code_block = &response[start..];
+            let end = code_block.find("```").unwrap_or(code_block.len());
+            code_block[..end].trim().to_string()
         } else {
-            &response[..]
-        }.to_string().trim().to_string();
+            String::new()
+        };
         
         if code.is_empty() {
             Ok(response)
