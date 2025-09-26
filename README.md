@@ -83,7 +83,7 @@ wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/
 
 ### Rust Agent
 ```bash
-cd core && cargo run --prompt "Generate a Rust function to compute fibonacci sequence"
+cd core && cargo run -- --llama-bin ../engine/build/bin/llama-cli --model ../models/TinyLlama-1.1B-q4_0.gguf --prompt "Generate a Rust function to compute fibonacci sequence"
 ```
 
 ### Zig Runtime
