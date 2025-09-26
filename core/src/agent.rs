@@ -1,8 +1,35 @@
 use super::cli::Args;
-use super::inference::LlmInference;
+use super::inference::{LlmInference, InferenceError};
 
 pub struct Agent {
     inference: LlmInference,
+}
+
+#[derive(Debug)]
+pub enum AgentError {
+    Inference(InferenceError),
+}
+
+impl std::fmt::Display for AgentError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentError::Inference(err) => write!(f, "{}", err),
+        }
+    }
+}
+
+impl std::error::Error for AgentError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            AgentError::Inference(err) => Some(err),
+        }
+    }
+}
+
+impl From<InferenceError> for AgentError {
+    fn from(err: InferenceError) -> Self {
+        AgentError::Inference(err)
+    }
 }
 
 impl Agent {
@@ -11,7 +38,7 @@ impl Agent {
         Agent { inference }
     }
 
-    pub fn generate_code(&self, args: &Args) -> Result<String, Box<dyn std::error::Error>> {
+    pub fn generate_code(&self, args: &Args) -> Result<String, AgentError> {
         // Enhance prompt for code generation
         let enhanced_prompt = format!(
             "You are a helpful coding assistant. Generate Rust code for: {}",
@@ -36,7 +63,7 @@ impl Agent {
     }
 }
 
-pub fn run_agent(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_agent(args: &Args) -> Result<(), AgentError> {
     let agent = Agent::new(args.llama_bin.clone(), args.model.clone());
     let result = agent.generate_code(args)?;
     println!("{}", result);

@@ -36,7 +36,10 @@ Note: To make the PATH permanent, add `export PATH=$PATH:/opt/zig` to your shell
 
 ### Lean4
 ```bash
-curl https://raw.githubusercontent.com/leanprover/lean4/master/scripts/install_ubuntu.sh | sh && export PATH=$PATH:$HOME/.elan/bin
+curl -O https://raw.githubusercontent.com/leanprover/lean4/master/scripts/install_ubuntu.sh
+# ... inspect the script ...
+sh install_ubuntu.sh
+export PATH=$PATH:$HOME/.elan/bin
 ```
 Note: To make the PATH permanent, add `export PATH=$PATH:$HOME/.elan/bin` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
 
