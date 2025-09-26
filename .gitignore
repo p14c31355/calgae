@@ -3,7 +3,7 @@ models/*
 !models/.gitkeep
 
 # Build artifacts
-/target/
+target/
 *.o
 *.so
 *.dll
