@@ -4,14 +4,14 @@ from typing import List
 struct Matrix:
     var rows: Int
     var cols: Int
-    var data: List[f64]
+    var data: List[Float64]
 
-fn matrix_from_list(a: List[List[f64]]) raises -> Matrix:
+fn matrix_from_list(a: List[List[Float64]]) raises -> Matrix:
     var rows = len(a)
     if rows == 0:
         raise Error("Cannot create matrix from empty list")
     var cols = len(a[0])
-    var data = List[f64]()
+    var data = List[Float64]()
     data.reserve_exact(rows * cols)
     for i in range(rows):
         var row = a[i]
@@ -21,23 +21,23 @@ fn matrix_from_list(a: List[List[f64]]) raises -> Matrix:
             data.append(elem)
     return Matrix(rows=rows, cols=cols, data=data)
 
-fn matrix_to_list(m: Matrix) -> List[List[f64]]:
-    var result = List[List[f64]]()
+fn matrix_to_list(m: Matrix) -> List[List[Float64]]:
+    var result = List[List[Float64]]()
     result.reserve_exact(m.rows)
     for i in range(m.rows):
-        var row = List[f64]()
+        var row = List[Float64]()
         row.reserve_exact(m.cols)
         for j in range(m.cols):
             row.append(m.data[i * m.cols + j])
         result.append(row)
     return result
 
-fn matmul(a: List[List[f64]], b: List[List[f64]]) raises -> List[List[f64]]:
+fn matmul(a: List[List[Float64]], b: List[List[Float64]]) raises -> List[List[Float64]]:
     var mat_a = matrix_from_list(a)
     var mat_b = matrix_from_list(b)
     if mat_a.cols != mat_b.rows:
         raise Error("Incompatible matrix dimensions: columns of A ({}) must equal rows of B ({}).".format(mat_a.cols, mat_b.rows))
-    var mat_c = Matrix(rows=mat_a.rows, cols=mat_b.cols, data=List[f64]())
+    var mat_c = Matrix(rows=mat_a.rows, cols=mat_b.cols, data=List[Float64]())
     mat_c.data.reserve_exact(mat_a.rows * mat_b.cols)
     for i in range(mat_a.rows):
         for j in range(mat_b.cols):
@@ -47,7 +47,7 @@ fn matmul(a: List[List[f64]], b: List[List[f64]]) raises -> List[List[f64]]:
             mat_c.data.append(sum)
     return matrix_to_list(mat_c)
 
-fn optimize( input: Float ) raises -> Float:
+fn optimize( input: Float64 ) raises -> Float64:
     return sqrt(input)
 
 fn main():
