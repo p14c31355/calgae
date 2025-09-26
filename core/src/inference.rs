@@ -15,7 +15,14 @@ impl std::fmt::Display for InferenceError {
     }
 }
 
-impl std::error::Error for InferenceError {}
+impl std::error::Error for InferenceError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            InferenceError::CommandFailed(_) => None,
+            InferenceError::Utf8Error(err) => Some(err),
+        }
+    }
+}
 
 pub struct LlmInference {
     llama_bin: String,
