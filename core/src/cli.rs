@@ -13,9 +13,9 @@ pub struct Args {
     #[arg(short, long, default_value = "50")]
     pub tokens: usize,
 
-    #[arg(short, long, help = "Path to the llama-cli binary")]
+    #[arg(short, long, help = "Path to the llama-cli binary", value_name = "PATH")]
     pub llama_bin: std::path::PathBuf,
 
-    #[arg(short, long, help = "Path to the GGUF model file")]
+    #[arg(short, long, help = "Path to the GGUF model file", value_name = "PATH")]
     pub model: std::path::PathBuf,
 }
