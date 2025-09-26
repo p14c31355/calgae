@@ -12,6 +12,6 @@ pub struct Args {
     #[arg(long, help = "Path to the llama-cli binary")]
     pub llama_bin: String,
 
-    #[arg(long, default_value = "../../models/TinyLlama-1.1B-q4_0.gguf")]
+    #[arg(long, help = "Path to the GGUF model file")]
     pub model: String,
 }
