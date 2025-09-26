@@ -17,11 +17,8 @@ cargo build --release
 echo "Building Lean4 proof"
 (cd proof && lake build)
 
-echo "Installing Python dependencies for ML (if not already installed)"
-if ! python3 -c "import codon" 2> /dev/null; then
-    echo "Installing Codon..."
-    pip install codon --user
-fi
+# Python dependencies like Codon should be installed manually
+# as per the instructions in README.md.
 
 # Note: Mojo kernels can be run directly with 'mojo ml/mojo/kernels.mojo'
 echo "Mojo kernels ready (no build step needed)"
