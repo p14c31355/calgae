@@ -1,5 +1,6 @@
 use super::cli::Args;
 use super::inference::{LlmInference, InferenceError};
+use regex::Regex;
 
 pub struct Agent {
     inference: LlmInference,
@@ -47,13 +48,19 @@ impl Agent {
 
         let response = self.inference.infer(&enhanced_prompt, args.tokens)?;
 
-        // Safe extraction of code block if present, fallback to full response
-        let code = response
-            .split("```rust")
-            .nth(1)
-            .and_then(|s| s.split("```").next())
-            .map(|s| s.trim().to_string())
-            .unwrap_or_default();
+        // Robust extraction of Rust code block using regex
+        let re = Regex::new(r#"```rust\s*(.*?)\s*```"#).unwrap();
+        let code = re.captures(&response)
+            .and_then(|caps| caps.get(1))
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_else(|| {
+                // Fallback: try extracting any code block
+                if let Some(caps) = Regex::new(r#"```(?:\w+)?\s*(.*?)\s*```"#).unwrap().captures(&response) {
+                    caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default()
+                } else {
+                    "".to_string()
+                }
+            });
 
         if code.is_empty() {
             Ok(response)
