@@ -6,7 +6,7 @@ set -e
 echo "Building all Calgae components..."
 
 # Build llama.cpp (C++)
-cd engine && mkdir -p build && cd build && cmake .. -DLLAMA_CURL=OFF && cmake --build . --config Release && cd ../..
+(cd engine && mkdir -p build && cd build && cmake .. -DLLAMA_CURL=OFF && cmake --build . --config Release)
 
 # Build Rust core
 cargo build --release
