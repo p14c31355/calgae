@@ -15,7 +15,7 @@ cargo build --release
 cd runtime && zig build-exe src/runtime.zig && cd ..
 
 echo "Building Lean4 proof"
-cd proof && lake build && cd ..
+(cd proof && lake build)
 
 echo "Installing Python dependencies for ML (if not already installed)"
 if ! python3 -c "import codon" 2> /dev/null; then
