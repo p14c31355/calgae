@@ -1,5 +1,6 @@
 from math import sqrt
 from typing import List
+from mojo import parallelize
 
 struct Matrix:
     var rows: Int
@@ -39,12 +40,21 @@ fn matmul(a: List[List[Float64]], b: List[List[Float64]]) raises -> List[List[Fl
         raise Error("Incompatible matrix dimensions: columns of A ({}) must equal rows of B ({}).".format(mat_a.cols, mat_b.rows))
     var mat_c = Matrix(rows=mat_a.rows, cols=mat_b.cols, data=List[Float64]())
     mat_c.data.reserve_exact(mat_a.rows * mat_b.cols)
-    for i in range(mat_a.rows):
+
+    fn compute_row(i: Int, mat_a: Matrix, mat_b: Matrix, mat_c: DTypePointer[Float64]):
         for j in range(mat_b.cols):
-            var sum = 0.0
+            var sum: Float64 = 0.0
             for k in range(mat_a.cols):
                 sum += mat_a.data[i * mat_a.cols + k] * mat_b.data[k * mat_b.cols + j]
-            mat_c.data.append(sum)
+            mat_c[i * mat_b.cols + j] = sum
+
+    @parameter
+    fn fill_mat_c():
+        var mat_c_data = mat_c.data.unsafe_ptr[0]
+        alias num_threads: Int = 4  # Adjust based on CPU cores
+        parallelize[compute_row](range(mat_a.rows), mat_a, mat_b, mat_c_data, num_threads)
+
+    fill_mat_c()
     return matrix_to_list(mat_c)
 
 fn optimize( input: Float64 ) raises -> Float64:
