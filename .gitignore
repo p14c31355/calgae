@@ -1,0 +1,30 @@
+# Ignore model binaries (too large for git)
+models/*
+!models/.gitkeep
+
+# Build artifacts
+/target/
+*.o
+*.so
+*.dll
+*.dylib
+*.exe
+**/*.rs.bk
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+
+# Zig
+zig-cache/
+zig-out/
+
+# Mojo / Codon
+*.ll
+*.bc
+
+# Misc
+.DS_Store
+*.log
