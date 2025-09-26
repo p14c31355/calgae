@@ -92,9 +92,10 @@ cd runtime && zig build-exe src/runtime.zig
 ./runtime zig
 ```
 
+
 ### Lean4 Verification
 ```bash
-cd proof && lake exe correctness
+cd proof && lake build
 ```
 
 ### Mojo Kernel

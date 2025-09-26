@@ -6,7 +6,7 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(llama_bin: String, model: String) -> Self {
+    pub fn new(llama_bin: std::path::PathBuf, model: std::path::PathBuf) -> Self {
         let inference = LlmInference::new(llama_bin, model);
         Agent { inference }
     }
@@ -36,7 +36,7 @@ impl Agent {
 }
 
 pub fn run_agent(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
-    let agent = Agent::new(&args.llama_bin, &args.model);
+    let agent = Agent::new(args.llama_bin.clone(), args.model.clone());
     let result = agent.generate_code(args)?;
     println!("{}", result);
     Ok(()) 
