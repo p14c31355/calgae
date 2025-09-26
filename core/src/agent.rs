@@ -6,8 +6,8 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub fn new(llama_bin: std::path::PathBuf, model: std::path::PathBuf) -> Self {
-        let inference = LlmInference::new(llama_bin, model);
+    pub fn new(llama_bin: &std::path::Path, model: &std::path::Path) -> Self {
+        let inference = LlmInference::new(llama_bin.to_path_buf(), model.to_path_buf());
         Agent { inference }
     }
 
