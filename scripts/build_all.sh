@@ -15,7 +15,7 @@ cd core && cargo build --release && cd ..
 cd runtime && zig build
 
 echo "Building Lean4 proof"
-cd proof && lake build
+(cd proof && lake build)
 
 echo "Installing Python dependencies for ML"
 cd ml/codon && pip install codon && cd ../..
