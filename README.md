@@ -124,7 +124,7 @@ To quantize other models, clone and follow AWQ repo instructions.
 # Download and install EdgeProfiler separately
 mkdir -p tools && git clone https://github.com/ruoyuliu/EdgeProfiler.git tools/edgeprofiler && cd tools/edgeprofiler && pip install -r requirements.txt
 # Run benchmark
-python -m edgeprofiler.benchmark --model_path models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf --backend llama.cpp
+python -m edgeprofiler.benchmark --model_path ../../models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf --backend llama.cpp
 ```
 Note: The `tools/` directory is included in `.gitignore` to avoid committing downloaded tools.
 
