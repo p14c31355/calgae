@@ -7,5 +7,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("{}", ALGAE_ART);
 
     let args = Args::parse();
-    run_agent(&args)
+    run_agent(&args)?;
+    Ok(())
 }
