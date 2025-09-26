@@ -18,7 +18,10 @@ echo "Building Lean4 proof"
 cd proof && lake build && cd ..
 
 echo "Installing Python dependencies for ML (if not already installed)"
-cd ml/codon && pip install codon --user && cd ../..
+if ! python3 -c "import codon" 2> /dev/null; then
+    echo "Installing Codon..."
+    pip install codon --user
+fi
 
 # Note: Mojo kernels can be run directly with 'mojo ml/mojo/kernels.mojo'
 echo "Mojo kernels ready (no build step needed)"
