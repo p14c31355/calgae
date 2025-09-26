@@ -1,0 +1,31 @@
+# High-performance matrix multiplication for LLM acceleration
+# Optimized for SIMD (Codon auto-vectorizes loops)
+
+from C import extern
+
+@extern
+def matrix_mult_c(
+    n: int32, p: int32, q: int32, 
+    a: Pointer[float32], b: Pointer[float32], 
+    c: Pointer[float32]
+) -> int32:
+    """FFI-compatible matrix mult: C = A * B, where A is n x q, B is q x p, C is n x p.
+    Flattened row-major arrays. Returns 0 on success."""
+    if n <= 0 or p <= 0 or q <= 0:
+        return -1
+    
+    # Initialize C to zero
+    for i in range(n * p):
+        c.store(i, 0.0)
+    
+    # Optimized loop with potential auto-SIMD
+    for i in range(n):
+        for j in range(p):
+            acc = 0.0
+            for k in range(q):
+                acc += a.load(i * q + k) * b.load(k * p + j)
+            c.store(i * p + j, acc)
+    
+    return 0
+
+# Compile note: codon compile --embed-rt --opt-level=3 kernel.codon -o libkernel.so -shared
