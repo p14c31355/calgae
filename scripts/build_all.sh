@@ -12,7 +12,7 @@ echo "Building all Calgae components..."
 cargo build --release
 
 # Build Zig runtime
-cd runtime && zig build-exe src/runtime.zig && cd ..
+(cd runtime && zig build-exe src/runtime.zig)
 
 echo "Building Lean4 proof"
 (cd proof && lake build)
