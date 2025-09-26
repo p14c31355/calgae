@@ -89,7 +89,7 @@ cd core && cargo run --prompt "Generate a Rust function to compute fibonacci seq
 ### Zig Runtime
 ```bash
 cd runtime && zig build-exe src/runtime.zig
-./src/runtime zig
+./runtime zig
 ```
 
 ### Lean4 Verification
