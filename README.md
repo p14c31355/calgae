@@ -76,7 +76,7 @@ cd ../..
 
 3. Download the model:
 ```bash
-wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -O models/TinyLlama-1.1B-q4_0.gguf
+mkdir -p models && wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -O models/TinyLlama-1.1B-q4_0.gguf
 ```
 
 ## Usage
