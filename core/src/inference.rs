@@ -1,4 +1,21 @@
-use std::process::{Command, Output};
+use std::process::Command;
+
+#[derive(Debug)]
+pub enum InferenceError {
+    CommandFailed(String),
+    Utf8Error(std::string::FromUtf8Error),
+}
+
+impl std::fmt::Display for InferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            InferenceError::CommandFailed(err) => write!(f, "LLM inference command failed: {}", err),
+            InferenceError::Utf8Error(err) => write!(f, "Invalid UTF-8 in output: {}", err),
+        }
+    }
+}
+
+impl std::error::Error for InferenceError {}
 
 pub struct LlmInference {
     llama_bin: String,
@@ -10,8 +27,8 @@ impl LlmInference {
         LlmInference { llama_bin, model }
     }
 
-    pub fn infer(&self, prompt: &str, tokens: usize) -> Result<String, Box<dyn std::error::Error>> {
-        let output: Output = Command::new(&self.llama_bin)
+    pub fn infer(&self, prompt: &str, tokens: usize) -> Result<String, InferenceError> {
+        let output = Command::new(&self.llama_bin)
             .arg("-m")
             .arg(&self.model)
             .arg("--prompt")
@@ -19,15 +36,15 @@ impl LlmInference {
             .arg("-n")
             .arg(tokens.to_string())
             .arg("--log-disable")
-            .output()?;
+            .output()
+            .map_err(|e| InferenceError::CommandFailed(format!("Failed to run command: {}", e)))?;
 
         if output.status.success() {
-            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+            String::from_utf8(output.stdout).map_err(InferenceError::Utf8Error)
+                .map(|s| s.trim().to_string())
         } else {
-            Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                format!("LLM inference failed: {}", String::from_utf8_lossy(&output.stderr))
-            )))
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(InferenceError::CommandFailed(format!("LLM inference failed: {}", stderr)))
         }
     }
 }

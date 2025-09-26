@@ -26,16 +26,19 @@ Calc Algae - self made LLM project (experimental)
 ```bash
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && source ~/.cargo/env
 ```
+Note: To make the PATH permanent, add `source ~/.cargo/env` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
 
 ### Zig
 ```bash
 wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && tar -xf zig-linux-x86_64-0.13.0.tar.xz && sudo mv zig-linux-x86_64-0.13.0 /opt/zig && export PATH=$PATH:/opt/zig
 ```
+Note: To make the PATH permanent, add `export PATH=$PATH:/opt/zig` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
 
 ### Lean4
 ```bash
 curl https://raw.githubusercontent.com/leanprover/lean4/master/scripts/install_ubuntu.sh | sh && export PATH=$PATH:$HOME/.elan/bin
 ```
+Note: To make the PATH permanent, add `export PATH=$PATH:$HOME/.elan/bin` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
 
 ### Mojo
 ```bash
@@ -54,41 +57,59 @@ sudo apt update && sudo apt install cmake build-essential git wget curl python3-
 ```
 
 ## Setup
+
+1. Clone the repository and its submodules (if engine is set as submodule, otherwise clone manually):
 ```bash
-mkdir -p {core/src,runtime/src,proof/src,ml/{mojo,codon},engine,models,scripts} && cd calgae && git clone https://github.com/ggerganov/llama.cpp.git engine && cd engine && mkdir -p build && cd build && cmake .. -DLLAMA_CURL=OFF && cmake --build . --config Release && cd ../../.. && wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -O models/TinyLlama-1.1B-q4_0.gguf
+git clone --recurse-submodules https://github.com/p14c31355/calgae.git
+cd calgae
+```
+(Note: If you've already cloned without --recurse-submodules, run `git submodule update --init --recursive` inside the repo.)
+
+2. Build the engine:
+```bash
+cd engine
+mkdir -p build && cd build
+cmake .. -DLLAMA_CURL=OFF
+cmake --build . --config Release
+cd ../..
+```
+
+3. Download the model:
+```bash
+wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -O models/TinyLlama-1.1B-q4_0.gguf
 ```
 
 ## Usage
 
 ### Rust Agent
 ```bash
-cd calgae/core && cargo run --prompt "Generate a Rust function to compute fibonacci sequence"
+cd core && cargo run --prompt "Generate a Rust function to compute fibonacci sequence"
 ```
 
 ### Zig Runtime
 ```bash
-cd calgae/runtime && zig build-exe src/runtime.zig
+cd runtime && zig build-exe src/runtime.zig
 ./src/runtime zig
 ```
 
 ### Lean4 Verification
 ```bash
-cd calgae/proof && lake exe correctness
+cd proof && lake exe correctness
 ```
 
 ### Mojo Kernel
 ```bash
-cd calgae/ml/mojo && mojo kernels.mojo
+cd ml/mojo && mojo kernels.mojo
 ```
 
 ### Codon Optimized
 ```bash
-cd calgae/ml/codon && python optimize.py
+cd ml/codon && python optimize.py
 ```
 
 ## Inference with TinyLlama
 ```bash
-cd calgae/engine/build/bin && ./llama-cli -m ../../models/TinyLlama-1.1B-q4_0.gguf --prompt "Hello, my name is" -n 50 --log-disable
+cd engine/build/bin && ./llama-cli -m ../../models/TinyLlama-1.1B-q4_0.gguf --prompt "Hello, my name is" -n 50 --log-disable
 ```
 
 ## AWQ Quantization
@@ -99,7 +120,7 @@ To quantize other models, clone and follow AWQ repo instructions.
 # Download and install EdgeProfiler separately
 git clone https://github.com/ruoyuliu/EdgeProfiler.git ../edgeprofiler && cd ../edgeprofiler && pip install -r requirements.txt
 # Run benchmark
-python -m edgeprofiler.benchmark --model_path calgae/models/TinyLlama-1.1B-q4_0.gguf --backend llama.cpp
+python -m edgeprofiler.benchmark --model_path models/TinyLlama-1.1B-q4_0.gguf --backend llama.cpp
 ```
 
 ### Next Steps

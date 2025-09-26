@@ -15,12 +15,3 @@ pub struct Args {
     #[arg(long, default_value = "../../models/TinyLlama-1.1B-q4_0.gguf")]
     pub model: String,
 }
-
-pub fn run_cli() {
-    let args = Args::parse();
-    println!("Prompt: {}", args.prompt);
-    println!("Generating {} tokens...", args.tokens);
-    // Call LlmInference::infer(&args)
-    // For now, stub
-    println!("Agent response stub: Code generation using LLM...");
-}

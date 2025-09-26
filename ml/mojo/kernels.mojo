@@ -1,21 +1,22 @@
-from sys.info import get_cpu_brand
 from math import sqrt
-from typing import List, Optional
+from typing import List
 
 fn matmul(a: List[List[f64]], b: List[List[f64]]) -> List[List[f64]]:
     var rows_a = len(a)
-    var cols_a = len(a[0])
-    var cols_b = len(b[0])
+    var cols_a = 0 if rows_a == 0 else len(a[0])
+    var rows_b = len(b)
+    var cols_b = 0 if rows_b == 0 else len(b[0])
     var result = List[List[f64]]()
-    result.from_typed(MemoryPointer[MemoryPointer[f64]].alloc(rows_a))
+    result.reserve_exact(rows_a)
     for i in range(rows_a):
-        result[i] = List[f64]()
-        result[i].from_typed(MemoryPointer[f64].alloc(cols_b))
+        var row = List[f64]()
+        row.reserve_exact(cols_b)
         for j in range(cols_b):
             var sum = 0.0
             for k in range(cols_a):
                 sum += a[i][k] * b[k][j]
-            result[i][j] = sum
+            row.append(sum)
+        result.append(row)
     return result
 
 fn optimize( input: Float ) raises -> Float:
