@@ -1,7 +1,6 @@
-package Calgae-proof where
+import Lake
+open Lake DSL
 
-import Init
+package CalgaeProof where
 
-target (target: Path) := do
-  # Add your targets here
-  pure ()
+lean_lib CalgaeProof
