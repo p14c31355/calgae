@@ -25,19 +25,19 @@ impl std::error::Error for InferenceError {
 }
 
 pub struct LlmInference {
-    llama_bin: String,
-    model: String,
+    llama_bin: std::path::PathBuf,
+    model: std::path::PathBuf,
 }
 
 impl LlmInference {
-    pub fn new(llama_bin: String, model: String) -> Self {
+    pub fn new(llama_bin: std::path::PathBuf, model: std::path::PathBuf) -> Self {
         LlmInference { llama_bin, model }
     }
 
     pub fn infer(&self, prompt: &str, tokens: usize) -> Result<String, InferenceError> {
-        let output = Command::new(&self.llama_bin)
+        let output = Command::new(self.llama_bin.as_os_str())
             .arg("-m")
-            .arg(&self.model)
+            .arg(self.model.as_os_str())
             .arg("--prompt")
             .arg(prompt)
             .arg("-n")
