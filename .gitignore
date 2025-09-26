@@ -28,3 +28,4 @@ zig-out/
 # Misc
 .DS_Store
 *.log
+tools/
