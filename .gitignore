@@ -3,7 +3,7 @@ models/*
 !models/.gitkeep
 
 # Build artifacts
-/target/
+target/
 *.o
 *.so
 *.dll
@@ -28,3 +28,4 @@ zig-out/
 # Misc
 .DS_Store
 *.log
+tools/
