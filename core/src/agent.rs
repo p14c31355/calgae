@@ -152,7 +152,7 @@ fn compile_and_execute(code: &str) -> AnyhowResult<()> {
         return Ok(());
     }
 
-    let exe_path = rs_path.with_extension("");
+    let exe_path = rs_path.with_extension(std::env::consts::EXE_EXTENSION);
     let run_output = process::Command::new(exe_path)
         .output()
         .map_err(|e| anyhow::anyhow!("Failed to run executable: {}", e))?;
