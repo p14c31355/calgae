@@ -76,10 +76,10 @@ impl LlmInference {
             rope_theta: hf_config.rope_theta,
             max_position_embeddings: hf_config.max_position_embeddings,
             tie_word_embeddings: hf_config.tie_word_embeddings,
-            use_flash_attn: todo!(),
-            bos_token_id: todo!(),
-            eos_token_id: todo!(),
-            rope_scaling: todo!(),
+            use_flash_attn: false,
+            bos_token_id: Some(hf_config.bos_token_id as u32),
+            eos_token_id: Some(hf_config.eos_token_id as u32),
+            rope_scaling: hf_config.rope_scaling.map(|s| candle_transformers::models::llama::RopeScaling { factor: s.factor, r#type: s.r#type }),
         };
 
         let weights: Vec<PathBuf> = fs::read_dir(&model_path)?
