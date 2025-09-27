@@ -11,7 +11,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     if !args.model.exists() {
-        eprintln!("Warning: Model file not found at {:?}. Run `cargo run --bin xtask prepare` to generate artifacts first.", args.model);
+        eprintln!("Warning: Model file not found at {:?}. Run `cargo run --bin xtask -- fetch-model` to download it.", args.model);
     }
 
     run_agent(args.model.clone(), args.prompt).await?;
