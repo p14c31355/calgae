@@ -4,10 +4,11 @@ use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
 use std::fs::File;
-use std::io::{self, BufRead, Write};
 use std::process;
 use std::sync::Arc;
 use tempfile::Builder;
+
+use std::io::Write;
 
 unsafe extern "C" {
     fn matrix_mult_c(n: i32, p: i32, q: i32, a: *const f32, b: *const f32, c: *mut f32) -> i32;
