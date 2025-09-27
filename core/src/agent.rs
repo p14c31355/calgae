@@ -10,16 +10,24 @@ use std::sync::Arc;
 use tempfile::Builder;
 
 unsafe extern "C" {
-    fn codon_matrix_mult(n: i32, p: i32, q: i32, a: *const f32, b: *const f32, c: *mut f32) -> i32;
+    fn matrix_mult_c(n: i32, p: i32, q: i32, a: *const f32, b: *const f32, c: *mut f32) -> i32;
 }
 
 fn use_codon_kernel(a: &[f32], b: &[f32]) -> Vec<f32> {
-    let n = a.len() as i32 / 1; // Assume flattened
-    let p = b.len() as i32 / 1;
-    let q = 1; // Square for simplicity
+    if a.is_empty() || b.is_empty() {
+        return vec![];
+    }
+    // Assume a: n x q (flattened, n rows, q cols), b: q x p
+    let q = 4; // Example batch size for matrices, adjust based on LLM matmul dims
+    let n = (a.len() as f32 / q as f32) as i32;
+    let p = (b.len() as f32 / q as f32) as i32;
     let mut c = vec![0.0f32; (n * p) as usize];
-    unsafe {
-        codon_matrix_mult(n, p, q, a.as_ptr(), b.as_ptr(), c.as_mut_ptr());
+    let status = unsafe {
+        matrix_mult_c(n, p, q, a.as_ptr(), b.as_ptr(), c.as_mut_ptr())
+    };
+    if status != 0 {
+        eprintln!("Codon kernel failed with status: {}", status);
+        return vec![];
     }
     c
 }

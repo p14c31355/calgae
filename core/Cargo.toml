@@ -13,11 +13,16 @@ once_cell = "1.19"
 tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 
+# Existing Candle dependencies for compatibility
 candle-core = "0.9.1"
 candle-nn = "0.9.1"
 candle-transformers = "0.9.1"
 hf-hub = "0.4.3"
 tokenizers = "0.22.1"
+
+# Add llm for lightweight quantized inference (GGUF support)
+llm = "1.3"
+num_cpus = "1.16"
 
 half = { version = "2.6.0", default-features = false }
 rand_distr = { version = "0.5.1", default-features = false }
