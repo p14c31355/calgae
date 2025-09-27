@@ -24,3 +24,77 @@ fn per_channel_max_abs_c(
         out_max.store(c, c_max)
 
     return 0
+
+# Top-k indices by descending order for salient channels
+@export("top_k_indices_c")
+fn top_k_indices_c(
+    act_max: UnsafePointer[Float32],
+    hidden_size: Int,
+    top_k: Int,
+    indices: UnsafePointer[Int32]
+) -> Int:
+    # Simple insertion sort for top-k (efficient for small k=0.001*hidden_size)
+    var temp_max: List[Float32] = List[Float32]()
+    var temp_idx: List[Int32] = List[Int32]()
+    temp_max.reserve(top_k)
+    temp_idx.reserve(top_k)
+
+    for i in range(hidden_size):
+        var val: Float32 = act_max.load(i)
+        var idx: Int32 = i
+        var inserted: Bool = False
+        for j in range(len(temp_max)):
+            if val > temp_max[j]:
+                temp_max.insert(j, val)
+                temp_idx.insert(j, idx)
+                if len(temp_max) > top_k:
+                    _ = temp_max.pop()
+                    _ = temp_idx.pop()
+                inserted = True
+                break
+        if not inserted and len(temp_max) < top_k:
+            temp_max.append(val)
+            temp_idx.append(idx)
+
+    # Sort temp by descending (simple bubble for small top_k)
+    for i in range(len(temp_max)):
+        for j in range(i + 1, len(temp_max)):
+            if temp_max[i] < temp_max[j]:
+                var swap_max = temp_max[i]
+                var swap_idx = temp_idx[i]
+                temp_max[i] = temp_max[j]
+                temp_idx[i] = temp_idx[j]
+                temp_max[j] = swap_max
+                temp_idx[j] = swap_idx
+
+    for i in range(top_k):
+        indices.store(i, temp_idx[i])
+
+    return 0
+
+# Compute scaling factor: overall_max / salient_max
+@export("compute_scale_c")
+fn compute_scale_c(
+    act_max: UnsafePointer[Float32],
+    hidden_size: Int,
+    salient_indices: UnsafePointer[Int32],
+    num_salient: Int,
+    scale_out: UnsafePointer[Float32]
+) -> Int:
+    var overall_max: Float32 = 0.0
+    for i in range(hidden_size):
+        var val: Float32 = act_max.load(i)
+        if val > overall_max:
+            overall_max = val
+
+    var salient_max: Float32 = 0.0
+    for i in range(num_salient):
+        var idx: Int = Int(salient_indices.load(i))
+        var val: Float32 = act_max.load(idx)
+        if val > salient_max:
+            salient_max = val
+
+    var scale: Float32 = overall_max / (salient_max + 1e-8)
+    scale_out.store(0, scale)
+
+    return 0
