@@ -24,13 +24,15 @@ test "add" {
 }
 
 test "matrix_mult" {
-    const a = [_]f32{1.0, 2.0, 3.0};
-    const b = [_]f32{4.0, 5.0, 6.0};
-    var c = [_]f32{0.0, 0.0, 0.0};
-    matrix_mult(1, 3, 3, &a, &b, &c);
-    try std.testing.expectApproxEqAbs(c[0], 32.0, 0.001);
-    try std.testing.expectApproxEqAbs(c[1], 0.0, 0.001);
-    try std.testing.expectApproxEqAbs(c[2], 0.0, 0.001);
+    // Test a 1x3 matrix multiplied by a 3x2 matrix, resulting in a 1x2 matrix.
+    const a = [_]f32{ 1.0, 2.0, 3.0 }; // 1x3
+    const b = [_]f32{ 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 }; // 3x2
+    var c = [_]f32{ 0.0, 0.0 }; // 1x2
+    matrix_mult(1, 2, 3, &a, &b, &c);
+
+    // Expected: [1*7+2*9+3*11, 1*8+2*10+3*12] = [7+18+33, 8+20+36] = [58, 64]
+    try std.testing.expectApproxEqAbs(c[0], 58.0, 0.001);
+    try std.testing.expectApproxEqAbs(c[1], 64.0, 0.001);
 }
 
 pub fn main() !void {

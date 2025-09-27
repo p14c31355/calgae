@@ -12,7 +12,7 @@ abbrev UInt4 : Type := Fin 16  -- 0 to 15
 
 -- Quantization function: scale and round to nearest integer
 def quantize_awq (w : Real) (scale : Real) : UInt4 :=
-  ⟨(Round.round (w / scale)).toNat % 16, sorry⟩  -- Simplified, prove bounds
+  ⟨(Round.round (w / scale)).toNat % 16, by apply Nat.mod_lt; decide⟩  -- Simplified, prove bounds
 
 -- Dequantization
 def dequantize_awq (q : UInt4) (scale : Real) : Real :=

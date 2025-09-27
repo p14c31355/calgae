@@ -1,6 +1,9 @@
 # High-performance matrix multiplication for LLM acceleration
 # Optimized for SIMD (Codon auto-vectorizes loops)
 
+from C import extern
+
+@extern
 def matrix_mult_c(
     n: int32, p: int32, q: int32, 
     a: Pointer[float32], b: Pointer[float32], 
@@ -24,8 +27,5 @@ def matrix_mult_c(
             c.store(i * p + j, acc)
     
     return 0
-
-# C ABI export for Rust FFI
-extern(0) def matrix_mult_c(n: int32, p: int32, q: int32, a: Pointer[float32], b: Pointer[float32], c: Pointer[float32]) -> int32
 
 # Compile note: codon compile --embed-rt --opt-level=3 kernel.codon -o libkernel.so -lshared

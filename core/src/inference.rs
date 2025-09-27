@@ -87,7 +87,10 @@ impl LlmInference {
         let prompt_len = encoding.get_ids().len();
         let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
 
-        let seed = 42u64;
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(42);
         let sampling = Sampling::TopKThenTopP {
             k: top_k,
             p: top_p as f64,
