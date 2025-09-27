@@ -23,8 +23,11 @@ enum Commands {
     /// Build all components (Zig runtime, Lean proofs, etc.)
     BuildAll,
 
-    /// Fetch models from HuggingFace
+    /// Fetch safetensors model from HuggingFace
     FetchModel,
+
+    /// Fetch quantized GGUF model for llm inference
+    FetchGGUF,
 
     /// Run AWQ quantization on TinyLlama using llm-compressor
     AwqQuantize,
