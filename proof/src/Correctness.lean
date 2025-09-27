@@ -20,7 +20,7 @@ def dequantize_awq (q : UInt4) (scale : Real) : Real :=
 
 -- Key property: quantization error bounded
 lemma quantization_error_bound (w : Real) (scale : Real) (h_scale : scale > 0) :
-  |quantize_awq w scale - (w / scale)| ≤ 0.5 := sorry
+  |quantize_awq w scale - (w / scale)| ≤ 0.5 := sorry -- TODO: Prove quantization error bound for AWQ correctness.
 
 -- Idempotence under dequantization (up to scale)
 lemma dequantize_quantize (w : Real) (scale : Real) (h_scale : scale > 0) :

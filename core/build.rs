@@ -14,14 +14,11 @@ fn main() {
     let status = Command::new("zig")
         .args(&["build-lib", "-O", "ReleaseSmall", "src/zig_kernel.zig", "-dynamic"])
         .current_dir("runtime")
-        .status();
+        .status()
+        .expect("Zig build-lib command failed");
 
-    if let Ok(status) = status {
-        if !status.success() {
-            println!("cargo:warning=Zig compilation failed with status: {}", status);
-        }
-    } else {
-        println!("cargo:warning=Fail to run zig build-lib, skipping Zig kernel");
+    if !status.success() {
+        panic!("Zig compilation failed with status: {}", status);
     }
 
     // Assume libzig_kernel.so is generated in runtime/
@@ -36,23 +33,20 @@ fn main() {
     let codon_status = Command::new("codon")
         .args(&["compile", "--embed-rt", "--opt-level=3", "ml/codon/kernel.codon", "-o", "libcodon_kernel.so", "-shared"])
         .current_dir(".")
-        .status();
+        .status()
+        .expect("Codon compile command failed");
 
-    if let Ok(status) = codon_status {
-        if status.success() {
-            let codon_lib_source = PathBuf::from("libcodon_kernel.so");
-            if codon_lib_source.exists() {
-                if let Err(e) = fs::copy(&codon_lib_source, out_dir.join("libcodon_kernel.so")) {
-                    println!("cargo:warning=Failed to copy codon library: {}", e);
-                }
-                println!("cargo:rustc-link-search=native={}", out_dir.display());
-                println!("cargo:rustc-link-lib=codon_kernel");
-            }
-        } else {
-            println!("cargo:warning=Codon compilation failed with status: {}", status);
+    if !codon_status.success() {
+        panic!("Codon compilation failed with status: {}", codon_status);
+    }
+
+    let codon_lib_source = PathBuf::from("libcodon_kernel.so");
+    if codon_lib_source.exists() {
+        if let Err(e) = fs::copy(&codon_lib_source, out_dir.join("libcodon_kernel.so")) {
+            println!("cargo:warning=Failed to copy codon library: {}", e);
         }
-    } else {
-        println!("cargo:warning=Failed to run codon compile, skipping Codon kernel");
+        println!("cargo:rustc-link-search=native={}", out_dir.display());
+        println!("cargo:rustc-link-lib=codon_kernel");
     }
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
