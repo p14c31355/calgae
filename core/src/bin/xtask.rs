@@ -239,7 +239,9 @@ async fn main() -> Result<()> {
                 if !file_path.exists() {
                     println!("Downloading {}...", filename);
                     let wget = AsyncCommand::new("wget")
-                        .args(["-O", file_path.to_str().unwrap(), url])
+                        .arg("-O")
+                        .arg(&file_path)
+                        .arg(url)
                         .status()
                         .await?;
                     if !wget.success() {
