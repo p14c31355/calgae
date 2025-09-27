@@ -95,8 +95,6 @@ impl LlmInference {
             tie_word_embeddings: hf_config.tie_word_embeddings,
         };
 
-        let dtype = DType::F32;
-
         let vb_paths: Vec<_> = model_path
             .read_dir()
             .context("Failed to read model dir")?
@@ -118,8 +116,7 @@ impl LlmInference {
             .ok_or_else(|| anyhow::anyhow!("Eos token <|endoftext|> not found"))?;
         let pad_token_id = tokenizer
             .token_to_id("<pad>")
-            .or_else(|| tokenizer.token_to_id("<|endoftext|>"))
-            .map(|id| id);
+            .or_else(|| tokenizer.token_to_id("<|endoftext|>"));
 
         Ok(Self {
             model,
