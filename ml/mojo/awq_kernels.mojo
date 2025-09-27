@@ -99,3 +99,42 @@ fn compute_scale_c(
     scale_out.store(0, scale)
 
     return 0
+
+# Compute SmoothQuant per-channel scales
+@export("compute_smoothquant_scales_c")
+fn compute_smoothquant_scales_c(
+    act_max: UnsafePointer[Float32],
+    hidden_size: Int,
+    sparsity: Float32,
+    bits: Int,
+    scales_out: UnsafePointer[Float32]
+) -> Int:
+    # Collect and sort act_max descending
+    var act_list: List[Float32] = List[Float32]()
+    act_list.reserve(hidden_size)
+    for i in range(hidden_size):
+        act_list.append(act_max.load(i))
+
+    # Bubble sort descending (simple for hidden_size ~4096, or use selection sort)
+    for i in range(hidden_size):
+        for j in range(i + 1, hidden_size):
+            if act_list[i] < act_list[j]:
+                var temp = act_list[i]
+                act_list[i] = act_list[j]
+                act_list[j] = temp
+
+    var num_outliers = Int(sparsity * Float32(hidden_size))
+    var beta: Float32 = 0.85
+    var qmax: Float32 = (1 << (bits - 1)) - 1  # Assuming signed int
+
+    # Set all scales to 1.0
+    for i in range(hidden_size):
+        scales_out.store(i, 1.0)
+
+    if num_outliers > 0:
+        var outlier_max: Float32 = act_list[0]  # Largest after descending sort
+        var scale_factor: Float32 = (outlier_max / beta) / qmax
+        for i in range(num_outliers):
+            scales_out.store(i, scale_factor)
+
+    return 0
