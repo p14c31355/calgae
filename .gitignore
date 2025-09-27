@@ -1,9 +1,8 @@
 # Ignore model binaries (too large for git)
-models/*
 !models/.gitkeep
-
+# *.safetensors
 # Build artifacts
-/target/
+target/
 *.o
 *.so
 *.dll
@@ -16,15 +15,46 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.pytest_cache/
 
 # Zig
-zig-cache/
+.zig-cache/
 zig-out/
 
 # Mojo / Codon
 *.ll
 *.bc
+mojo_build/
+
+# Lean4
+_build/
+.lean-kinds/
+.lean-tags/
+lean_dep/
+lean4-build/
+
+# IDE and editor files
+*.swp
+*.swo
+*~
+.vscode/*
+!.vscode/settings.json
+.idea/
 
 # Misc
 .DS_Store
 *.log
+tools/
+.env
+coverage/
+test-results/
+
+# Ignore large model files and directories
+models/
+!models/.gitkeep
+llm-compressor/models/
+*.gguf
+*.safetensors
+
+# Specific virtual env
+llm-compressor/venv/

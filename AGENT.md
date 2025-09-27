@@ -234,20 +234,20 @@ Agents should be:
 
 ### ✅ Short-term
 
-* [ ] Quantize small model with AWQ.
-* [ ] Run inference in llama.cpp.
-* [ ] Benchmark with EdgeProfiler.
+* [x] Quantize small model with AWQ.
+* [x] Run inference in llama.cpp.
+* [x] Benchmark with EdgeProfiler.
 
 ### 🔜 Mid-term
 
-* [ ] Build Rust orchestrator.
+* [x] Build Rust orchestrator.
 * [ ] Add Zig kernels for matmul.
 * [ ] Deploy accelerated components in **Mojo/Codon**.
 
 ### 🎯 Long-term
 
-* [ ] Formalize quantization correctness in Lean4.
-* [ ] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
+* [x] Formalize quantization correctness in Lean4.
+* [x] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
 * [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Codon + Lean4).
 
 ---
