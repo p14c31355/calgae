@@ -24,6 +24,7 @@ rand_distr = { version = "0.5.1", default-features = false }
 
 thiserror = "2.0.16"
 serde_json = "1.0.145"
+serde = { version = "1.0", features = ["derive"] }
 
 pyo3 = { version = "0.26.0", features = ["abi3-py38"] }
 
