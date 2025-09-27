@@ -37,7 +37,7 @@ impl Agent {
             prompt
         );
 
-        let response = self.infer_async(&enhanced_prompt, tokens, 0.7, 50, 0.9).await?;
+        let response = self.infer_async(&enhanced_prompt, tokens, 0.7, 50, 0.95).await?;
 
         // Robust extraction of code block using lazy-compiled regexes
         static RUST_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?s)```rust\s*(.*?)```"#).unwrap());
