@@ -28,4 +28,4 @@ def matrix_mult_c(
     
     return 0
 
-# Compile note: codon compile --embed-rt --opt-level=3 kernel.codon -o libkernel.so -lshared
+# Compile note: codon compile --embed-rt --opt-level=3 kernel.codon -o libkernel.so -shared
