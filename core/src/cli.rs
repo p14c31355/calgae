@@ -16,6 +16,15 @@ pub struct Args {
     #[arg(short, long, default_value = "512")]
     pub tokens: usize,
 
+    #[arg(short = 't', long, default_value = "0.7")]
+    pub temperature: f32,
+
+    #[arg(short, long, default_value = "50")]
+    pub top_k: usize,
+
+    #[arg(short, long, default_value = "0.95")]
+    pub top_p: f32,
+
     #[arg(
         short,
         long,
