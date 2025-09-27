@@ -201,7 +201,7 @@ impl LlmInference {
         top_p: f32,
         rng: &mut ThreadRng,
     ) -> Result<u32> {
-        let seed = rng.gen();
+        let seed = rng.random();
         let temp = temperature as f64;
         let sampling = if temperature == 0.0 {
             Sampling::ArgMax
