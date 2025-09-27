@@ -11,6 +11,24 @@ import os
 import platform
 import time
 
+# Load Mojo library for optimized kernels - required for execution
+mojo_lib = None
+try:
+    mojo_lib = ctypes.CDLL(os.path.join(os.path.dirname(__file__), 'libawq.so'))
+    # Verify required functions are available
+    mojo_lib.per_channel_max_abs_c.restype = ctypes.c_int
+    mojo_lib.top_k_indices_c.restype = ctypes.c_int
+    mojo_lib.compute_scale_c.restype = ctypes.c_int
+    mojo_lib.compute_smoothquant_scales_c.restype = ctypes.c_int
+    print("Mojo library loaded successfully.")
+except OSError as e:
+    raise RuntimeError(f"Failed to load required Mojo libawq.so: {e}")
+except Exception as e:
+    raise RuntimeError(f"Unexpected error loading libawq.so or verifying functions: {e}")
+
+if not mojo_lib:
+    raise RuntimeError("Mojo library is mandatory for this implementation.")
+
 def load_calibration_data(tokenizer, num_samples=128, max_length=2048):
     """
     Load realistic calibration data (e.g., from a simple text corpus).
@@ -38,18 +56,33 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
     activations = {}  # Dict of layer_name: tensor of per-channel max abs act
     hooks = []
 
-    # Fallback to torch for channel max since Mojo load failed
     def hook_fn(name):
         def hook(module, input, output):
             if isinstance(output, tuple):
                 output = output[0]
             act_abs = torch.abs(output).float()
             batch_size, seq_len, hidden_size = act_abs.shape
-            channel_max = torch.max(act_abs.view(batch_size * seq_len, hidden_size), dim=0)[0].cpu()
+            flat_abs = act_abs.view(batch_size * seq_len, hidden_size).cpu().numpy().astype(np.float32)
+            channel_max = np.zeros(hidden_size, dtype=np.float32)
+
+            if not mojo_lib:
+                raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
+
+            # Call Mojo per_channel_max_abs_c: abs_output (flat), b*s, hidden_size, out_max
+            res = mojo_lib.per_channel_max_abs_c(
+                flat_abs.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                ctypes.c_int(batch_size),
+                ctypes.c_int(seq_len),
+                ctypes.c_int(hidden_size),
+                channel_max.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+            )
+            if res != 0:
+                raise RuntimeError(f"Mojo per_channel_max_abs_c failed for {name}")
+
             if name not in activations:
-                activations[name] = channel_max
+                activations[name] = torch.tensor(channel_max)
             else:
-                activations[name] = torch.max(activations[name], channel_max)
+                activations[name] = torch.max(activations[name], torch.tensor(channel_max))
         return hook
     
     # Register hooks on all key linear layers
@@ -82,10 +115,8 @@ def find_salient_channels(activations, top_k_percent=0.001):
     """
     Identify top-k% salient output channels per layer based on max abs activation.
     """
-    if mojo_lib:
-        lib = mojo_lib
-    else:
-        lib = None
+    if not mojo_lib:
+        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
 
     salient_channels = {}
     for name, act_max_torch in activations.items():
@@ -93,11 +124,14 @@ def find_salient_channels(activations, top_k_percent=0.001):
         hidden_size = len(act_max)
         num_salient = max(1, int(hidden_size * top_k_percent))
         indices = np.zeros(num_salient, dtype=np.int32)
-        if lib:
-            lib.top_k_indices_c(act_max, hidden_size, num_salient, indices)
-        else:
-            sorted_indices = torch.argsort(act_max_torch, descending=True)
-            indices = sorted_indices[:num_salient].numpy()
+        res = mojo_lib.top_k_indices_c(
+            act_max.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            ctypes.c_int(hidden_size),
+            ctypes.c_int(num_salient),
+            indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int))
+        )
+        if res != 0:
+            raise RuntimeError(f"Mojo top_k_indices_c failed for {name}")
         salient_channels[name] = indices.tolist()
     return salient_channels
 
@@ -105,10 +139,8 @@ def compute_scaling_factors(activations, salient_channels):
     """
     Compute per-layer scale: max_all_act / max_salient_act to scale up salient channels.
     """
-    if mojo_lib:
-        lib = mojo_lib
-    else:
-        lib = None
+    if not mojo_lib:
+        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
 
     scales = {}
     for name, act_max_torch in activations.items():
@@ -117,14 +149,16 @@ def compute_scaling_factors(activations, salient_channels):
         salient_indices = np.array(salient_channels[name], dtype=np.int32)
         num_salient = len(salient_indices)
         scale_out = np.zeros(1, dtype=np.float32)
-        if lib:
-            lib.compute_scale_c(act_max, hidden_size, salient_indices, num_salient, scale_out)
-            scale = scale_out[0]
-        else:
-            salient_max = torch.max(act_max_torch[salient_indices])
-            overall_max = torch.max(act_max_torch)
-            scale = overall_max / (salient_max + 1e-8)
-        scales[name] = float(scale)
+        res = mojo_lib.compute_scale_c(
+            act_max.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            ctypes.c_int(hidden_size),
+            salient_indices.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
+            ctypes.c_int(num_salient),
+            scale_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        )
+        if res != 0:
+            raise RuntimeError(f"Mojo compute_scale_c failed for {name}")
+        scales[name] = float(scale_out[0])
     return scales
 
 def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
@@ -133,20 +167,24 @@ def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
     Based on SmoothQuant paper: Fit activation distribution to quantization range, compensate in weights.
     sparsity: Fraction of channels to apply heavy scaling (outlier channels).
     """
+    if not mojo_lib:
+        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
+
     smooth_scales = {}
-    for name, act_max in activations.items():
-        # Sort channels by activation max (outliers are high)
-        sorted_max = torch.sort(act_max, descending=True)[0]
-        num_outliers = int(len(act_max) * sparsity)
-        # For top sparsity channels, compute scale to fit to 8-bit range
-        # Assume beta=0.85 from paper for outlier absorption
-        beta = 0.85
-        qmax = 2 ** (bits - 1) - 1
-        scales = torch.ones_like(act_max)
-        if num_outliers > 0:
-            outlier_max = sorted_max[:num_outliers].max()
-            scales[:num_outliers] = (outlier_max / beta) / qmax  # Scale act down, compensate in weight
-        smooth_scales[name] = scales.tolist()  # Per-channel scales
+    for name, act_max_torch in activations.items():
+        act_max = act_max_torch.numpy().astype(np.float32)
+        hidden_size = len(act_max)
+        scales_out = np.ones(hidden_size, dtype=np.float32)
+        res = mojo_lib.compute_smoothquant_scales_c(
+            act_max.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+            ctypes.c_int(hidden_size),
+            ctypes.c_float(sparsity),
+            ctypes.c_int(bits),
+            scales_out.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
+        )
+        if res != 0:
+            raise RuntimeError(f"Mojo compute_smoothquant_scales_c failed for {name}")
+        smooth_scales[name] = scales_out.tolist()
     return smooth_scales
 
 def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=128):
