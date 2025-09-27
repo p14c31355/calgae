@@ -4,10 +4,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
+use std::sync::Arc;
 use tokio::task::JoinHandle;
 
 pub struct Agent {
-    inference: LlmInference,
+    inference: Arc<LlmInference>,
 }
 
 #[derive(Debug)]
@@ -23,15 +24,17 @@ impl std::error::Error for AgentError {}
 
 impl Agent {
     pub async fn new(model: std::path::PathBuf) -> AnyhowResult<Self> {
-        let inference = LlmInference::new(model).map_err(AgentError)?;
+        let inference = Arc::new(LlmInference::new(model)?);
         Ok(Agent { inference })
     }
 
     async fn infer_async(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
         // Wrap sync inference in blocking task for async
-        let inference = &self.inference;
-        tokio::task::spawn_blocking(move || inference.infer(prompt, tokens)).await??;
-        let res = tokio::task::spawn_blocking(move || inference.infer(prompt, tokens)).await?;
+        let inference = self.inference.clone();
+        let prompt = prompt.to_string();
+        let res = tokio::task::spawn_blocking(move || inference.infer(&prompt, tokens))
+            .await
+            .map_err(|e| anyhow::anyhow!("blocking task failed: {}", e))?;
         res
     }
 

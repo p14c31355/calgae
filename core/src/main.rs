@@ -1,5 +1,5 @@
-use crate::agent::run_agent;
-use crate::cli::Args;
+use calgae_core::agent::run_agent;
+use calgae_core::cli::Args;
 use clap::Parser;
 
 const ALGAE_ART: &str = "\n                                 ,---.\n                                /   ,     ,-~^\"#\n                                \\   \\      /  \\\n                                 '---^--^    ^---^ \nCalgae: Lightweight LLM Runtime\n\"Write code for me\" and press Enter for assistance.\n";
