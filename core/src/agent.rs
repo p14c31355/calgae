@@ -1,53 +1,49 @@
 use super::cli::Args;
-use super::inference::{LlmInference, InferenceError};
+use super::inference::LlmInference;
 use once_cell::sync::Lazy;
 use regex::Regex;
+
+use anyhow::Result as AnyhowResult;
+use tokio::task::JoinHandle;
 
 pub struct Agent {
     inference: LlmInference,
 }
 
 #[derive(Debug)]
-pub enum AgentError {
-    Inference(InferenceError),
-}
+pub enum AgentError {}
 
 impl std::fmt::Display for AgentError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentError::Inference(err) => write!(f, "{}", err),
-        }
+    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Ok(())
     }
 }
 
-impl std::error::Error for AgentError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            AgentError::Inference(err) => Some(err),
-        }
-    }
-}
-
-impl From<InferenceError> for AgentError {
-    fn from(err: InferenceError) -> Self {
-        AgentError::Inference(err)
-    }
-}
+impl std::error::Error for AgentError {}
 
 impl Agent {
-    pub fn new(model: &std::path::Path) -> Result<Self, AgentError> {
-        let inference = LlmInference::new(model.to_path_buf()).map_err(AgentError::Inference)?;
+    pub async fn new(model: std::path::PathBuf) -> AnyhowResult<Self> {
+        let inference = LlmInference::new(model).map_err(AgentError)?;
         Ok(Agent { inference })
     }
 
-    pub fn generate_code(&self, args: &Args) -> Result<String, AgentError> {
+    async fn infer_async(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
+        // Wrap sync inference in blocking task for async
+        let inference = &self.inference;
+        tokio::task::spawn_blocking(move || inference.infer(prompt, tokens)).await??;
+        let res = tokio::task::spawn_blocking(move || inference.infer(prompt, tokens)).await?;
+        res
+    }
+
+    /// Generate code for a single prompt asynchronously
+    pub async fn generate_code(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
         // Enhance prompt for code generation
         let enhanced_prompt = format!(
             "You are a helpful coding assistant. Generate Rust code for: {}",
-            args.prompt
+            prompt
         );
 
-        let response = self.inference.infer(&enhanced_prompt, args.tokens)?;
+        let response = self.infer_async(&enhanced_prompt, tokens).await?;
 
         // Robust extraction of code block using lazy-compiled regexes
         static RUST_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?s)```rust\s*(.*?)```"#).unwrap());
@@ -68,11 +64,31 @@ impl Agent {
             Ok(format!("Generated code:\n{}", code))
         }
     }
+
+    /// Run multiple generation tasks in parallel
+    pub async fn generate_codes_parallel(&self, prompts: Vec<&str>, tokens: usize) -> AnyhowResult<Vec<String>> {
+        let mut tasks = Vec::new();
+        for prompt in prompts {
+            let agent_clone = self.inference.clone();  // Note: Clone if possible, or Arc<Mutex> for shared
+            let task: JoinHandle<AnyhowResult<String>> = tokio::spawn(async move {
+                // For shared inference, use Arc; but for now assume cloneable or single use
+                // TODO: Use Arc<LlmInference> for concurrent inference if supported
+                Err(anyhow::anyhow!("Parallel not fully implemented"))  // Placeholder
+            });
+            tasks.push(task);
+        }
+
+        let mut results = Vec::new();
+        for task in tasks {
+            results.push(task.await??);
+        }
+        Ok(results)
+    }
 }
 
-pub fn run_agent(args: &Args) -> Result<(), AgentError> {
-    let agent = Agent::new(&args.model)?;
-    let result = agent.generate_code(args)?;
+pub async fn run_agent(agent_path: std::path::PathBuf, prompt: String) -> AnyhowResult<()> {
+    let agent = Agent::new(agent_path).await?;
+    let result = agent.generate_code(&prompt, 512).await?;
     println!("{}", result);
     Ok(())
 }
