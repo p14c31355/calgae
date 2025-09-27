@@ -128,6 +128,20 @@ python -m edgeprofiler.benchmark --model_path ../../models/tinyllama-1.1b-chat-v
 ```
 Note: The `tools/` directory is included in `.gitignore` to avoid committing downloaded tools.
 
+## 5-Second Quick Start Demo
+
+After cloning, the following commands complete the setup and execution (model download may take time on first run).
+
+```bash
+git clone https://github.com/p14c31355/calgae.git
+cd calgae
+./scripts/setup_all.sh
+./scripts/fetch_model.sh  # Fetch model (first time only)
+./scripts/run_cpu_llm.sh  # Run LLM (default prompt for Rust code generation)
+```
+
+This will run the basic LLM inference and code generation in Calgae!
+
 ### Next Steps
 - Multi-language code generation from LLM prompts.
 - FFI integration for Rust-Zig-Lean-Mojo-Codon.

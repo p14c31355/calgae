@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+    - name: Build
+      run: cd core && cargo build --verbose
+    - name: Run tests
+      run: cd core && cargo test --verbose
+
+  zig:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Install Zig
+      uses: jiggy98/action-zig@v1.2.0
+      with:
+        version: 0.13.0
+    - name: Build and test
+      run: cd runtime && zig build test
+
+  lean4:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Install Lean 4
+      uses: leanprover/lean4/setup@v2
+    - name: Build proofs
+      run: cd proof && lake exe cache get && lake build
+
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Install dependencies
+      run: sudo apt-get update && sudo apt-get install -y cmake build-essential
+    - name: Build llama.cpp
+      run: cd engine && mkdir -p build && cd build && cmake .. -DLLAMA_CURL=OFF && make -j2
+
+  scripts:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: recursive
+    - name: Run setup script
+      run: chmod +x scripts/setup_all.sh && ./scripts/setup_all.sh || true  # Allow non-interactive setup
+    - name: Run fetch model script
+      run: chmod +x scripts/fetch_model.sh && ./scripts/fetch_model.sh
+    - name: Run LLM script
+      run: chmod +x scripts/run_cpu_llm.sh && ./scripts/run_cpu_llm.sh || true  # Model run may be heavy

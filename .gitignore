@@ -16,16 +16,51 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.pytest_cache/
 
 # Zig
-zig-cache/
+.zig-cache/
 zig-out/
 
 # Mojo / Codon
 *.ll
 *.bc
+mojo_build/
+
+# Lean4
+_build/
+.lean-kinds/
+.lean-tags/
+lean_dep/
+lean4-build/
+
+# Engine (llama.cpp)
+engine/build/
+engine/ggml/
+engine/CMakeCache.txt
+engine/CMakeFiles/
+engine/tests/*.bin
+engine/*.log
+
+# Model files
+*.gguf
+*.bin
+*.safetensors
+
+# Cargo
+Cargo.lock
+
+# IDE and editor files
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
 
 # Misc
 .DS_Store
 *.log
 tools/
+.env
+coverage/
+test-results/
