@@ -63,9 +63,9 @@ impl Agent {
 
     /// Generate code for a single prompt asynchronously
     pub async fn generate_code(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
-        // Enhance prompt for code generation
+        // Enhance prompt for coding agent: Follow instructions to generate code, suggest edits, or explain
         let enhanced_prompt = format!(
-            "You are a helpful coding assistant. Generate only Rust code for: {}",
+            "You are Calgae, a CLI coding agent. The user is giving a programming task for the current Rust project (Calgae LLM runtime). Analyze the instruction and respond with:\n1. Explanation of how to implement it.\n2. Generated or edited Rust code in blocks.\n3. Specific file paths to apply changes (e.g., 'Add to core/src/inference.rs').\n4. Commands to run (e.g., 'cargo build').\nKeep responses concise and actionable.\n\nUser task: {}",
             prompt
         );
 
@@ -73,24 +73,29 @@ impl Agent {
             .infer_async(&enhanced_prompt, tokens)
             .await?;
 
-        // Robust extraction of code block using lazy-compiled regexes
+        // Extract code blocks and instructions
         static RUST_CODE_BLOCK_RE: Lazy<Regex> =
             Lazy::new(|| Regex::new(r#"(?s)```rust\s*(.*?)```"#).unwrap());
-        static ANY_CODE_BLOCK_RE: Lazy<Regex> =
-            Lazy::new(|| Regex::new(r#"(?s)```(?:\w+)?\s*(.*?)```"#).unwrap());
+        static COMMAND_RE: Lazy<Regex> =
+            Lazy::new(|| Regex::new(r"Commands?:? ?([^\n]+)").unwrap());
 
-        let code = RUST_CODE_BLOCK_RE
-            .captures(&response)
-            .and_then(|caps| caps.get(1))
-            .or_else(||
-                ANY_CODE_BLOCK_RE
-                    .captures(&response)
-                    .and_then(|caps| caps.get(1))
-            )
-            .map(|m| m.as_str().trim().to_string())
-            .unwrap_or(response.trim().to_string());
+        let mut full_response = response.clone();
+        let code_blocks = RUST_CODE_BLOCK_RE.captures_iter(&response)
+            .map(|caps| caps.get(1).unwrap().as_str().trim().to_string())
+            .collect::<Vec<_>>();
+        
+        if !code_blocks.is_empty() {
+            full_response += "\n\nExtracted code blocks:\n";
+            for (i, code) in code_blocks.iter().enumerate() {
+                full_response += &format!("Block {}:\n{}\n", i+1, code);
+            }
+        }
 
-        Ok(code)
+        if let Some(cmd_caps) = COMMAND_RE.captures(&response) {
+            full_response += &format!("\nSuggested command: {}", cmd_caps.get(1).unwrap().as_str().trim());
+        }
+
+        Ok(full_response.trim().to_string())
     }
 
     /// Run multiple generation tasks in parallel
@@ -162,7 +167,8 @@ fn run_interactive_loop(
     use std::io::{self, BufRead};
 
     println!("\nCalgae Interactive Coding Agent Ready!");
-    println!("Enter programming task (e.g., 'Write a Rust function to compute fibonacci'):");
+    println!("Enter programming task (e.g., 'Add a function to compute fibonacci in inference.rs'):");
+    println!("Provide instructions; I'll generate code, suggest changes, and commands.\n");
     println!("Type 'exit' to quit, 'exec' to toggle code execution, 'help' for commands.\n");
     let mut execute_mode = execute;
     if execute_mode {
@@ -185,13 +191,13 @@ fn run_interactive_loop(
                 continue;
             }
             "help" => {
-                println!("Commands: 'task description' to generate code, 'exec' to toggle execution, 'exit' to quit.");
+                println!("Commands: 'task description' for code generation/suggestions, 'exec' to toggle execution, 'exit' to quit.");
                 continue;
             }
             "" | "#" => continue,
             _ => {}
         }
-        println!("Generating code for: {}", input);
+        println!("Analyzing and generating for: {}\n", input);
         let agent_clone = agent.clone();
         let input_clone = input.clone();
         let code_result = tokio::task::block_in_place(|| {
@@ -200,16 +206,29 @@ fn run_interactive_loop(
             })
         });
         match code_result {
-            Ok(code) => {
-                println!("\nGenerated code:\n---");
-                println!("{}", code);
+            Ok(response) => {
+                println!("\nCalgae Response:\n---");
+                println!("{}", response);
                 println!("---\n");
 
+                if execute_mode && response.contains("cargo ") || response.contains("rustc ") {
+                    // Simple command extraction and exec if flagged
+                    if let Some(cmd_start) = response.find("Command: ") {
+                        let cmd = &response[cmd_start + 9..].lines().next().unwrap_or("").trim();
+                        println!("Executing suggested command: {}", cmd);
+                        if let Err(e) = std::process::Command::new("sh").arg("-c").arg(cmd).output() {
+                            eprintln!("Command execution error: {}", e);
+                        }
+                    }
+                }
+
                 if execute_mode {
-                    if let Err(e) = compile_and_execute(&code) {
-                        eprintln!("Execution error: {}", e);
-                    } else {
-                        println!("\nNext input:");
+                    // Extract and execute any standalone code if present
+                    if let Some(code) = response.lines().find(|l| l.starts_with("fn ")) {
+                        println!("Executing extracted function code...");
+                        if let Err(e) = compile_and_execute(code) {
+                            eprintln!("Execution error: {}", e);
+                        }
                     }
                 } else {
                     println!("(Execution disabled. Use 'exec' to enable.)\nNext input:");
@@ -220,6 +239,7 @@ fn run_interactive_loop(
                 println!("\nNext input:");
             }
         }
+        println!("Next input:");
     }
 }
 
@@ -227,6 +247,9 @@ pub async fn run_agent(
     model: std::path::PathBuf,
     prompt: String,
     tokens: usize,
+    temperature: f32,
+    top_k: usize,
+    top_p: f32,
     execute: bool,
     interactive: bool,
 ) -> AnyhowResult<()> {
@@ -235,12 +258,15 @@ pub async fn run_agent(
     if interactive {
         run_interactive_loop(&agent, tokens, execute);
     } else {
-        let code = agent.generate_code(&prompt, tokens).await?;
+        let response = agent.generate_code(&prompt, tokens).await?;
 
-        println!("Generated code:\n{}\n", code);
+        println!("Calgae Response for '{}':\n---\n{}\n---", prompt, response);
 
+        // Suggest applying changes manually or execute if simple
         if execute {
-            compile_and_execute(&code).map_err(|e| anyhow::anyhow!("Execution failed: {}", e))?;
+            if response.contains("fn ") || response.contains("impl ") {
+                compile_and_execute(&response).map_err(|e| anyhow::anyhow!("Execution failed: {}", e))?;
+            }
         }
     }
 
