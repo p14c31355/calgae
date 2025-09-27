@@ -14,12 +14,11 @@ unsafe extern "C" {
     fn matrix_mult_c(n: i32, p: i32, q: i32, a: *const f32, b: *const f32, c: *mut f32) -> i32;
 }
 
-fn use_codon_kernel(a: &[f32], b: &[f32]) -> Vec<f32> {
+fn use_codon_kernel(a: &[f32], b: &[f32], q: usize) -> Vec<f32> {
     if a.is_empty() || b.is_empty() {
         return vec![];
     }
     // Assume a: n x q (flattened, n rows, q cols), b: q x p
-    let q: usize = 4; // Example batch size for matrices, adjust based on LLM matmul dims
     assert!(a.len() % q == 0, "Input 'a' length must be a multiple of q");
     assert!(b.len() % q == 0, "Input 'b' length must be a multiple of q");
     let n = (a.len() / q) as i32;
@@ -35,43 +34,35 @@ fn use_codon_kernel(a: &[f32], b: &[f32]) -> Vec<f32> {
     c
 }
 
-pub trait AccelerationPlugin {
-    fn accelerate(&self, input: &[f32], op: &str) -> Vec<f32>;
-}
-
 #[derive(Clone)]
 pub struct Agent {
     inference: Arc<LlmInference>,
-    plugins: Vec<Arc<dyn AccelerationPlugin + Send + Sync>>,  // Integrated plugin system
 }
 
 impl Agent {
     pub async fn new(model: std::path::PathBuf) -> AnyhowResult<Self> {
         let inference = Arc::new(LlmInference::new(model, None)?);
-        Ok(Agent { inference, plugins: Vec::new() })
+        Ok(Agent { inference })
     }
 
     async fn infer_async(
         &self,
         prompt: &str,
         tokens: usize,
-        temperature: f32,
-        top_k: usize,
-        top_p: f32,
     ) -> AnyhowResult<String> {
         // Wrap sync inference in blocking task for async
         let inference = self.inference.clone();
         let prompt = prompt.to_string();
 
         tokio::task::spawn_blocking(move || {
-            inference.infer(&prompt, tokens, temperature, top_k, top_p)
+            inference.infer(&prompt, tokens)
         })
         .await
         .map_err(|e| anyhow::anyhow!("blocking task failed: {}", e))?
     }
 
     /// Generate code for a single prompt asynchronously
-    pub async fn generate_code(&self, prompt: &str, tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<String> {
+    pub async fn generate_code(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
         // Enhance prompt for code generation
         let enhanced_prompt = format!(
             "You are a helpful coding assistant. Generate only Rust code for: {}",
@@ -79,7 +70,7 @@ impl Agent {
         );
 
         let response = self
-            .infer_async(&enhanced_prompt, tokens, temperature, top_k, top_p)
+            .infer_async(&enhanced_prompt, tokens)
             .await?;
 
         // Robust extraction of code block using lazy-compiled regexes
@@ -99,12 +90,6 @@ impl Agent {
             .map(|m| m.as_str().trim().to_string())
             .unwrap_or(response.trim().to_string());
 
-        // Integrate Codon kernel for example computation in orchestrator
-        let a = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
-        let b = vec![5.0f32, 6.0f32, 7.0f32, 8.0f32];
-        let result = use_codon_kernel(&a, &b);
-        println!("Codon kernel integrated result: {:?}", result);
-
         Ok(code)
     }
 
@@ -113,14 +98,11 @@ impl Agent {
         &self,
         prompts: Vec<&str>,
         tokens: usize,
-        temperature: f32,
-        top_k: usize,
-        top_p: f32,
     ) -> AnyhowResult<Vec<String>> {
         let tasks = prompts.into_iter().map(|prompt| {
             let agent = self.clone();
             let prompt = prompt.to_string();
-            tokio::spawn(async move { agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await })
+            tokio::spawn(async move { agent.generate_code(&prompt, tokens).await })
         });
 
         let results = futures::future::try_join_all(tasks).await?;
@@ -175,9 +157,6 @@ fn compile_and_execute(code: &str) -> AnyhowResult<()> {
 fn run_interactive_loop(
     agent: &Agent,
     tokens: usize,
-    temperature: f32,
-    top_k: usize,
-    top_p: f32,
     execute: bool,
 ) {
     use std::io::{self, BufRead};
@@ -217,7 +196,7 @@ fn run_interactive_loop(
         let input_clone = input.clone();
         let code_result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async move {
-                agent_clone.generate_code(&input_clone, tokens, temperature, top_k, top_p).await
+                agent_clone.generate_code(&input_clone, tokens).await
             })
         });
         match code_result {
@@ -248,18 +227,15 @@ pub async fn run_agent(
     model: std::path::PathBuf,
     prompt: String,
     tokens: usize,
-    temperature: f32,
-    top_k: usize,
-    top_p: f32,
     execute: bool,
     interactive: bool,
 ) -> AnyhowResult<()> {
     let agent = Agent::new(model).await?;
 
     if interactive {
-        run_interactive_loop(&agent, tokens, temperature, top_k, top_p, execute);
+        run_interactive_loop(&agent, tokens, execute);
     } else {
-        let code = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
+        let code = agent.generate_code(&prompt, tokens).await?;
 
         println!("Generated code:\n{}\n", code);
 

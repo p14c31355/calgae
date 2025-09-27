@@ -110,9 +110,6 @@ impl LlmInference {
         &self,
         prompt: &str,
         max_tokens: usize,
-        _temperature: f32,
-        _top_k: usize,
-        _top_p: f32,
     ) -> Result<String> {
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;
