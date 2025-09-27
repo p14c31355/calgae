@@ -140,19 +140,39 @@ pub async fn run_agent(
     if interactive {
         use std::io::{self, BufRead};
 
-        println!("Interactive mode: Enter prompts (type 'exit' to quit).");
+        println!("\nCalgae Interactive Coding Agent Ready!");
+        println!("Enter programming task (e.g., 'Write a Rust function to compute fibonacci'):");
+        println!("Type 'exit' to quit, 'exec' to toggle code execution, 'help' for commands.\n");
+        let mut execute_mode = execute;
         let stdin = io::stdin();
         for line in stdin.lock().lines() {
             let input = line?.trim().to_string();
-            if input.to_lowercase() == "exit" {
-                break;
+            match input.to_lowercase().as_str() {
+                "exit" => {
+                    println!("Goodbye!");
+                    break;
+                }
+                "exec" => {
+                    execute_mode = !execute_mode;
+                    println!("Code execution {}abled.", if execute_mode { "en" } else { "dis" });
+                    continue;
+                }
+                "help" => {
+                    println!("Commands: 'task description' to generate code, 'exec' to toggle execution, 'exit' to quit.");
+                    continue;
+                }
+                "" | "#" => continue,  // Ignore empty or comment lines
+                _ => {}
             }
-            if input.is_empty() {
-                continue;
-            }
+            println!("Generating code for: {}", input);
             let code = agent.generate_code(&input, tokens, temperature, top_k, top_p).await?;
 
-            if execute {
+            println!("\nGenerated code:\n---");
+            println!("{}", code);
+            println!("---\n");
+
+            if execute_mode {
+                println!("Compiling and executing...\n");
                 let rs_path = Builder::new()
                     .prefix("calgae_generated")
                     .suffix(".rs")
@@ -172,6 +192,7 @@ pub async fn run_agent(
 
                 if !output.status.success() {
                     eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
+                    println!("\nNext input:");
                     continue;
                 }
 
@@ -191,8 +212,9 @@ pub async fn run_agent(
                 if !run_output.stderr.is_empty() {
                     eprintln!("Runtime stderr:\n{}", String::from_utf8_lossy(&run_output.stderr));
                 }
+                println!("\nNext input:");
             } else {
-                println!("Generated code:\n{}\n", code);
+                println!("(Execution disabled. Use 'exec' to enable.)\nNext input:");
             }
         }
     } else {
