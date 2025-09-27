@@ -6,7 +6,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import numpy as np
 from typing import Dict, List, Any
 import json
-import numba
 import numpy as np
 
 def load_calibration_data(tokenizer, num_samples=128, max_length=2048):
@@ -36,17 +35,6 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
     activations = {}  # Dict of layer_name: tensor of per-channel max abs act
     hooks = []
     
-    @numba.jit(nopython=True)
-    def per_channel_max_abs_np(abs_data, batch_size, seq_len, hidden_size):
-        out_max = np.zeros(hidden_size, dtype=np.float32)
-        for c in range(hidden_size):
-            for b in range(batch_size):
-                for s in range(seq_len):
-                    idx = (b * seq_len + s) * hidden_size + c
-                    val = abs_data[idx]
-                    if val > out_max[c]:
-                        out_max[c] = val
-        return out_max
     
     def hook_fn(name):
         def hook(module, input, output):

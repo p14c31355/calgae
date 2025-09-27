@@ -21,6 +21,8 @@ use std::sync::Arc;
 
 use log::info;
 
+use rand::Rng;
+
 use std::fs;
 
 use serde_json::from_str;
@@ -114,6 +116,9 @@ impl LlmInference {
         &self,
         prompt: &str,
         max_tokens: usize,
+        temperature: f32,
+        top_k: usize,
+        top_p: f32,
     ) -> Result<String> {
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;

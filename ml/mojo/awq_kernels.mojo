@@ -33,7 +33,8 @@ fn top_k_indices_c(
     top_k: Int,
     indices: UnsafePointer[Int32]
 ) -> Int:
-    # Simple insertion sort for top-k (efficient for small k=0.001*hidden_size)
+    # Collects up to top-k candidates by scanning and maintaining a partial list, then bubble sorts for descending order. O(n*k) time.
+    # For small top_k relative to hidden_size, this is acceptable. For larger top_k, a min-heap would be more efficient with O(n log k).
     var temp_max: List[Float32] = List[Float32]()
     var temp_idx: List[Int32] = List[Int32]()
     temp_max.reserve(top_k)
