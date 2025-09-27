@@ -19,11 +19,7 @@ enum Commands {
     Prepare,
 
     /// Setup all dependencies (Rust, Zig, Lean, Mojo, Codon, etc.)
-    Setup {
-        /// Skip system package updates
-        #[arg(long, default_value_t = false)]
-        no_apt: bool,
-    },
+    Setup,
 
     /// Build all components (Zig runtime, Lean proofs, etc.)
     BuildAll,
@@ -100,108 +96,76 @@ async fn main() -> Result<()> {
             Ok(())
         },
 
-        Commands::Setup { no_apt } => {
+        Commands::Setup => {
             println!("Setting up Calgae dependencies...");
 
-            if !no_apt {
-                println!("Updating system packages...");
-                let apt_update = AsyncCommand::new("sudo")
-                    .args(["apt", "update"])
-                    .status()
-                    .await?;
-                if !apt_update.success() {
-                    eprintln!("Warning: apt update failed. Continuing...");
-                }
-
-                println!("Installing base dependencies...");
-                let apt_install = AsyncCommand::new("sudo")
-                    .args(["apt", "install", "-y", "build-essential", "cmake", "git", "curl", "wget", "python3", "python3-pip"])
-                    .status()
-                    .await?;
-                if !apt_install.success() {
-                    eprintln!("Warning: Base dependencies install failed. Continuing...");
+            // Check base system dependencies
+            let base_deps = ["build-essential", "cmake", "git", "curl", "wget", "python3", "python3-pip"];
+            for &dep in &base_deps {
+                if dep == "build-essential" {
+                    // Check if gcc is available as proxy for build-essential
+                    if !is_command_available("gcc").await? {
+                        eprintln!("Warning: GCC (build-essential) not found. Please install: sudo apt install build-essential");
+                    }
+                } else {
+                    let cmd = match dep {
+                        "cmake" => "cmake",
+                        "git" => "git",
+                        "curl" => "curl",
+                        "wget" => "wget",
+                        "python3" => "python3",
+                        "python3-pip" => "pip3",
+                        _ => continue,
+                    };
+                    if !is_command_available(cmd).await? {
+                        eprintln!("Warning: {} not found. Please install: sudo apt install {}", cmd, dep);
+                    }
                 }
             }
 
             // Rust setup
-            println!("Setting up Rust...");
+            println!("Checking Rust...");
             if !is_command_available("cargo").await? {
-                println!("Installing Rust...");
-                let rustup = AsyncCommand::new("bash")
-                    .args(["-c", "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"])
-                    .status()
-                    .await?;
-                if rustup.success() {
-                    println!("Rust installed. Run 'source $HOME/.cargo/env' in your shell.");
-                } else {
-                    eprintln!("Warning: Rust installation failed.");
-                }
+                println!("Rust not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y");
+                println!("Then add to PATH: source $HOME/.cargo/env");
+            } else {
+                println!("Rust is available.");
             }
 
             // Zig setup
-            println!("Setting up Zig...");
+            println!("Checking Zig...");
             if !is_command_available("zig").await? {
                 let zig_version = "0.13.0";
                 let zig_url = format!("https://ziglang.org/download/{}/zig-linux-x86_64-{}.tar.xz", zig_version, zig_version);
-                println!("Installing Zig...");
-                let wget_zig = AsyncCommand::new("wget")
-                    .arg(&zig_url)
-                    .status()
-                    .await?;
-                if wget_zig.success() {
-                    let tar_zig = AsyncCommand::new("tar")
-                        .arg("-xvf")
-                        .arg(format!("zig-linux-x86_64-{}.tar.xz", zig_version))
-                        .status()
-                    .await?;
-                    if tar_zig.success() {
-                        let mv_zig = AsyncCommand::new("sudo")
-                            .arg("mv")
-                            .arg(format!("zig-linux-x86_64-{}", zig_version))
-                            .arg("/usr/local/")
-                            .status()
-                            .await?;
-                        if mv_zig.success() {
-                            println!("Zig installed to /usr/local. Add /usr/local/zig-linux-x86_64-{} to PATH.", zig_version);
-                        }
-                    }
-                    let _ = AsyncCommand::new("rm")
-                        .arg(format!("zig-linux-x86_64-{}.tar.xz", zig_version))
-                        .status()
-                        .await?;
-                }
+                println!("Zig not found. Download and install manually:");
+                println!("  wget {}", zig_url);
+                println!("  tar -xvf zig-linux-x86_64-{}.tar.xz", zig_version);
+                println!("  sudo mv zig-linux-x86_64-{} /usr/local/", zig_version);
+                println!("  Add /usr/local/zig-linux-x86_64-{} to PATH.", zig_version);
+            } else {
+                println!("Zig is available.");
             }
 
             // Lean4 setup
-            println!("Setting up Lean4...");
+            println!("Checking Lean4...");
             if !is_command_available("lake").await? {
-                println!("Installing Lean4...");
-                let elan = AsyncCommand::new("bash")
-                    .args(["-c", "curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh"])
-                    .status()
-                    .await?;
-                if elan.success() {
-                    println!("Lean4 installed. Run 'source ~/.elan/env'.");
-                }
+                println!("Lean4 not found. Install via Elan:");
+                println!("  curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh");
+                println!("Then add to PATH: source ~/.elan/env");
+            } else {
+                println!("Lean4 is available.");
             }
 
             // Mojo setup
-            println!("Setting up Mojo...");
+            println!("Checking Mojo...");
             if !is_command_available("mojo").await? {
-                println!("Installing Mojo...");
-                let modular = AsyncCommand::new("bash")
-                    .args(["-c", "curl https://get.modular.com | sh -s -- -y"])
-                    .status()
-                    .await?;
-                if modular.success() {
-                    let activate_install = AsyncCommand::new("bash")
-                        .args(["-c", "source ~/.modular/bin/activate && modular install mojo"])
-                        .status()
-                        .await?;
-                    if activate_install.success() {
-                        println!("Mojo installed. Run 'source ~/.modular/bin/activate'.");
-                    }
-                }
+                println!("Mojo not found. Install via Modular:");
+                println!("  curl https://get.modular.com | sh -s -- -y");
+                println!("  source ~/.modular/bin/activate");
+                println!("  modular install mojo");
+                println!("Then run 'source ~/.modular/bin/activate' to use.");
+            } else {
+                println!("Mojo is available.");
             }
 
             // Codon setup
@@ -211,7 +175,7 @@ async fn main() -> Result<()> {
                 .status()
                 .await?;
             if !codon_install.success() {
-                eprintln!("Warning: Codon installation failed.");
+                eprintln!("Warning: Codon installation failed. Run 'pip3 install codon' manually.");
             }
 
             // Engine setup

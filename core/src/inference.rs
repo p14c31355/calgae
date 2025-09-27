@@ -8,6 +8,14 @@ use candle_transformers::models::llama::{Cache, Config, Llama};
 use std::path::{Path, PathBuf};
 use tokenizers::tokenizer::Tokenizer;
 
+use serde::Deserialize;
+use std::fs;
+
+use rand::prelude::*;
+use rand::distributions::WeightedIndex;
+use candle_nn::ops::softmax;
+use candle_core::D;
+
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -40,22 +48,48 @@ impl LlmInference {
         let tokenizer = Tokenizer::from_file(&tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer from {:?}: {}", tokenizer_path, e))?;
 
-        // Hardcode TinyLlama config (avoids serde issues)
+        // Load config dynamically from config.json
+        let config_path = model_path.join("config.json");
+        let config_str = fs::read_to_string(&config_path)
+            .map_err(|e| anyhow::anyhow!("Failed to read config from {:?}: {}", config_path, e))?;
+        
+        #[derive(Deserialize)]
+        struct HfLlamaConfig {
+            vocab_size: usize,
+            hidden_size: usize,
+            intermediate_size: usize,
+            num_hidden_layers: usize,
+            num_attention_heads: usize,
+            num_key_value_heads: Option<usize>,
+            rms_norm_eps: f64,
+            rope_theta: f64,
+            max_position_embeddings: usize,
+            bos_token_id: Option<u32>,
+            eos_token_id: Option<u32>,
+            tie_word_embeddings: bool,
+            #[serde(default)]
+            rope_scaling: Option<serde_json::Value>,
+        }
+
+        let hf_config: HfLlamaConfig = serde_json::from_str(&config_str)
+            .map_err(|e| anyhow::anyhow!("Failed to parse config: {}", e))?;
+        
+        let num_kv_heads = hf_config.num_key_value_heads.unwrap_or(hf_config.num_attention_heads);
         let config = Config {
-            hidden_size: 2048,
-            intermediate_size: 5632,
-            vocab_size: 32000,
-            num_hidden_layers: 22,
-            num_attention_heads: 32,
-            num_key_value_heads: 32,
+            hidden_size: hf_config.hidden_size,
+            intermediate_size: hf_config.intermediate_size,
+            vocab_size: hf_config.vocab_size,
+            num_hidden_layers: hf_config.num_hidden_layers,
+            num_attention_heads: hf_config.num_attention_heads,
+            num_key_value_heads: num_kv_heads,
             use_flash_attn: false,
-            rms_norm_eps: 1e-5,
-            rope_theta: 500000.0,
+            rms_norm_eps: hf_config.rms_norm_eps,
+            rope_theta: hf_config.rope_theta,
             bos_token_id: None,
             eos_token_id: None,
-            rope_scaling: None,
-            max_position_embeddings: 2048,
-            tie_word_embeddings: false,
+            rope_scaling: None, // TODO: implement if needed
+            max_position_embeddings: hf_config.max_position_embeddings,
+            tie_word_embeddings: hf_config.tie_word_embeddings,
         };
 
         let dtype = DType::F32;
@@ -95,8 +129,9 @@ impl LlmInference {
     }
 
     /// Performs inference on the prompt, generating up to `max_tokens`.
-    /// Uses greedy sampling on CPU.
-    pub fn infer(&self, prompt: &str, max_tokens: usize) -> Result<String> {
+    /// Uses configurable sampling on CPU.
+    pub fn infer(&self, prompt: &str, max_tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> Result<String> {
+        let mut rng = thread_rng();
         let mut tokens: Vec<i64> = self
             .tokenizer
             .encode(prompt, true)
@@ -118,8 +153,8 @@ impl LlmInference {
         let context_len = tokens.len();
         let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
         let logits_prefill = self.model.forward(&input, 0, &mut cache)?;
-        let logits_last = logits_prefill.i((0usize, context_len - 1, ..))?.argmax(logits_prefill.dims().len() - 1)?.squeeze(0)?.to_scalar::<i64>()? as u32;
-        let next_token_i = logits_last;
+        let prefill_logits = logits_prefill.i((0usize, context_len - 1, ..))?;
+        let next_token_i = self.sample_from_logits(&prefill_logits, temperature, top_k, top_p, &mut rng)?;
 
         let mut generated = 0u32;
 
@@ -137,7 +172,8 @@ impl LlmInference {
             let input = Tensor::new(&[next_token_i as i64], &self.device)?.unsqueeze(0)?;
             let index_pos = tokens.len() - 1;
             let logits = self.model.forward(&input, index_pos, &mut cache)?;
-            let next_token_i = logits.argmax(logits.dims().len() - 1)?.squeeze(0)?.to_scalar::<i64>()? as u32;
+            let seq_logits = logits.i((0, 0, ..))?;
+            let next_token_i = self.sample_from_logits(&seq_logits, temperature, top_k, top_p, &mut rng)?;
 
             if next_token_i == self.eos_token_id {
                 break;
@@ -156,6 +192,77 @@ impl LlmInference {
         } else {
             Ok(output)
         }
+    }
+}
+
+    fn sample_from_logits(
+        &self,
+        logits: &Tensor,
+        temperature: f32,
+        top_k: usize,
+        top_p: f32,
+        rng: &mut ThreadRng,
+    ) -> Result<u32> {
+        if temperature == 0.0 {
+            let next = logits.argmax(0)?.to_scalar::<i64>()? as u32;
+            return Ok(next);
+        }
+
+        let scaled = logits / temperature;
+        let probs = softmax(&scaled, D::Minus1)?;
+        let probs_v: Vec<f32> = probs.to_vec1::<f32>()?;
+
+        let mut probs_copy = probs_v.clone();
+
+        // Top-k sampling
+        if top_k > 0 {
+            let mut sorted: Vec<(usize, f32)> = probs_copy.iter().enumerate().map(|(i, &p)| (i, p)).collect();
+            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let cut = std::cmp::min(top_k, sorted.len());
+            let mut new_probs = vec![0.0f32; probs_copy.len()];
+            let mut sum_p = 0.0f32;
+            for i in 0..cut {
+                new_probs[sorted[i].0] = sorted[i].1;
+                sum_p += sorted[i].1;
+            }
+            if sum_p > 0.0 {
+                for p in new_probs.iter_mut() {
+                    *p /= sum_p;
+                }
+            }
+            probs_copy = new_probs;
+        }
+
+        // Top-p sampling
+        if top_p < 1.0 {
+            let mut sorted: Vec<(usize, f32)> = probs_copy.iter().enumerate().map(|(i, &p)| (i, p)).collect();
+            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            let mut cum = 0.0f32;
+            let mut cut = sorted.len();
+            for i in 0..sorted.len() {
+                cum += sorted[i].1;
+                if cum > top_p {
+                    cut = i + 1;
+                    break;
+                }
+            }
+            let mut new_probs = vec![0.0f32; probs_copy.len()];
+            let mut sum_p = 0.0f32;
+            for i in 0..cut {
+                new_probs[sorted[i].0] = sorted[i].1;
+                sum_p += sorted[i].1;
+            }
+            if sum_p > 0.0 {
+                for p in new_probs.iter_mut() {
+                    *p /= sum_p;
+                }
+            }
+            probs_copy = new_probs;
+        }
+
+        let dist = WeightedIndex::new(&probs_copy).map_err(|e| anyhow::anyhow!("Invalid probabilities: {}", e))?;
+        let next = dist.sample(rng) as u32;
+        Ok(next)
     }
 }
 

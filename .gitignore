@@ -47,8 +47,6 @@ engine/*.log
 *.bin
 *.safetensors
 
-# Cargo
-Cargo.lock
 
 # IDE and editor files
 *.swp
