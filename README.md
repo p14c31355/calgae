@@ -40,7 +40,7 @@ Calgae is a high-speed, resource-efficient LLM runtime built with modern safe sy
 
 Run the agent:
 ```
-cargo run --bin calgae -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust" --tokens 128 --temperature 0.7 --execute true --interactive
+cargo run -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust" --tokens 128 --temperature 0.7 --execute true --interactive
 ```
 
 - `--model`: Path to GGUF or Safetensors model.
