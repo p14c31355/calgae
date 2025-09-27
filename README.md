@@ -33,17 +33,17 @@ Calgae is a high-speed, resource-efficient LLM runtime built with modern safe sy
 
 4. Download a model:
    ```
-   cargo run --bin xtask -- fetch-model --model TinyLlama/TinyLlama-1.1B-Chat-v1.0
+   cargo run --bin xtask -- fetch-model
    ```
 
 ## Usage
 
 Run the agent:
 ```
-cargo run -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust" --tokens 128 --temperature 0.7 --execute true --interactive
+cargo run --bin agent --model models/tinyllama --prompt "Write a hello world in Rust" --tokens 128 --temperature 0.7 --top-k 50 --top-p 0.9
 ```
 
-- `--model`: Path to GGUF or Safetensors model.
+- `--model`: Path to TinyLlama safetensors model directory.
 - `--prompt`: Input prompt.
 - `--tokens`: Max generation length.
 - `--temperature`: Sampling temperature.
@@ -62,13 +62,12 @@ cargo run -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust
 
 ## Quantization
 
-Use `llm-compressor/awq.py` to quantize models:
+Run AWQ quantization:
 ```
-cd llm-compressor
-python awq.py
+cargo run --bin xtask -- awq-quantize
 ```
 
-Requires AutoAWQ in virtual environment.
+Creates a virtual env for dependencies and saves to `models/tinyllama-awq`.
 
 ## Contributing
 
