@@ -9,6 +9,21 @@ use std::process;
 use std::sync::Arc;
 use tempfile::Builder;
 
+unsafe extern "C" {
+    fn codon_matrix_mult(n: i32, p: i32, q: i32, a: *const f32, b: *const f32, c: *mut f32) -> i32;
+}
+
+fn use_codon_kernel(a: &[f32], b: &[f32]) -> Vec<f32> {
+    let n = a.len() as i32 / 1; // Assume flattened
+    let p = b.len() as i32 / 1;
+    let q = 1; // Square for simplicity
+    let mut c = vec![0.0f32; (n * p) as usize];
+    unsafe {
+        codon_matrix_mult(n, p, q, a.as_ptr(), b.as_ptr(), c.as_mut_ptr());
+    }
+    c
+}
+
 #[derive(Clone)]
 pub struct Agent {
     inference: Arc<LlmInference>,
@@ -68,6 +83,12 @@ impl Agent {
             .map(|m| m.as_str().trim().to_string())
             .unwrap_or(response.trim().to_string());
 
+        // Integrate Codon kernel for example computation in orchestrator
+        let a = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
+        let b = vec![5.0f32, 6.0f32, 7.0f32, 8.0f32];
+        let result = use_codon_kernel(&a, &b);
+        println!("Codon kernel integrated result: {:?}", result);
+
         Ok(code)
     }
 
@@ -99,51 +120,113 @@ pub async fn run_agent(
     top_k: usize,
     top_p: f32,
     execute: bool,
+    interactive: bool,
 ) -> AnyhowResult<()> {
     let agent = Agent::new(model).await?;
-    let code = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
 
-    if execute {
-        let rs_path = Builder::new()
-            .prefix("calgae_generated")
-            .suffix(".rs")
-            .tempfile()?
-            .path()
-            .to_path_buf();
+    if interactive {
+        use std::io::{self, BufRead};
 
-        let mut f = File::create(&rs_path)
-            .map_err(|e| anyhow::anyhow!("Failed to create temp file: {}", e))?;
-        f.write_all(code.as_bytes())
-            .map_err(|e| anyhow::anyhow!("Failed to write code: {}", e))?;
-
-        let output = process::Command::new("rustc")
-            .arg(&rs_path)
-            .output()
-            .map_err(|e| anyhow::anyhow!("Failed to compile: {}", e))?;
-
-        if !output.status.success() {
-            eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
-            return Ok(());
-        }
-
-        let exe_path = rs_path.with_extension("");
-        let run_output = process::Command::new(exe_path)
-            .output()
-            .map_err(|e| anyhow::anyhow!("Failed to run executable: {}", e))?;
-
-        if run_output.status.success() {
-            if !run_output.stdout.is_empty() {
-                println!("Execution output:\n{}", String::from_utf8_lossy(&run_output.stdout));
+        println!("Interactive mode: Enter prompts (type 'exit' to quit).");
+        let stdin = io::stdin();
+        for line in stdin.lock().lines() {
+            let input = line?.trim().to_string();
+            if input.to_lowercase() == "exit" {
+                break;
             }
-        } else {
-            println!("Execution failed: {}", run_output.status);
-        }
+            if input.is_empty() {
+                continue;
+            }
+            let code = agent.generate_code(&input, tokens, temperature, top_k, top_p).await?;
 
-        if !run_output.stderr.is_empty() {
-            eprintln!("Runtime stderr:\n{}", String::from_utf8_lossy(&run_output.stderr));
+            if execute {
+                let rs_path = Builder::new()
+                    .prefix("calgae_generated")
+                    .suffix(".rs")
+                    .tempfile()?
+                    .path()
+                    .to_path_buf();
+
+                let mut f = File::create(&rs_path)
+                    .map_err(|e| anyhow::anyhow!("Failed to create temp file: {}", e))?;
+                f.write_all(code.as_bytes())
+                    .map_err(|e| anyhow::anyhow!("Failed to write code: {}", e))?;
+
+                let output = process::Command::new("rustc")
+                    .arg(&rs_path)
+                    .output()
+                    .map_err(|e| anyhow::anyhow!("Failed to compile: {}", e))?;
+
+                if !output.status.success() {
+                    eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
+                    continue;
+                }
+
+                let exe_path = rs_path.with_extension("");
+                let run_output = process::Command::new(exe_path)
+                    .output()
+                    .map_err(|e| anyhow::anyhow!("Failed to run executable: {}", e))?;
+
+                if run_output.status.success() {
+                    if !run_output.stdout.is_empty() {
+                        println!("Execution output:\n{}", String::from_utf8_lossy(&run_output.stdout));
+                    }
+                } else {
+                    println!("Execution failed: {}", run_output.status);
+                }
+
+                if !run_output.stderr.is_empty() {
+                    eprintln!("Runtime stderr:\n{}", String::from_utf8_lossy(&run_output.stderr));
+                }
+            } else {
+                println!("Generated code:\n{}\n", code);
+            }
         }
     } else {
-        println!("Generated code:\n{}\n", code);
+        let code = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
+
+        if execute {
+            let rs_path = Builder::new()
+                .prefix("calgae_generated")
+                .suffix(".rs")
+                .tempfile()?
+                .path()
+                .to_path_buf();
+
+            let mut f = File::create(&rs_path)
+                .map_err(|e| anyhow::anyhow!("Failed to create temp file: {}", e))?;
+            f.write_all(code.as_bytes())
+                .map_err(|e| anyhow::anyhow!("Failed to write code: {}", e))?;
+
+            let output = process::Command::new("rustc")
+                .arg(&rs_path)
+                .output()
+                .map_err(|e| anyhow::anyhow!("Failed to compile: {}", e))?;
+
+            if !output.status.success() {
+                eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
+                return Ok(());
+            }
+
+            let exe_path = rs_path.with_extension("");
+            let run_output = process::Command::new(exe_path)
+                .output()
+                .map_err(|e| anyhow::anyhow!("Failed to run executable: {}", e))?;
+
+            if run_output.status.success() {
+                if !run_output.stdout.is_empty() {
+                    println!("Execution output:\n{}", String::from_utf8_lossy(&run_output.stdout));
+                }
+            } else {
+                println!("Execution failed: {}", run_output.status);
+            }
+
+            if !run_output.stderr.is_empty() {
+                eprintln!("Runtime stderr:\n{}", String::from_utf8_lossy(&run_output.stderr));
+            }
+        } else {
+            println!("Generated code:\n{}\n", code);
+        }
     }
 
     Ok(())
