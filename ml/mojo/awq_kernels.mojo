@@ -1,51 +1,29 @@
-# AWQ activation statistics kernel for per-channel max abs in Mojo
-# Optimized for SIMD and parallelization
+# Mojo kernel for AWQ per-channel max abs
+# Export as C library for Python interop
 
-from memory.unsafe import Pointer
-from sys.info import simdwidthof
-from math import max
-from random import rand
-from tensor_types import DType
-from tensor import Tensor, TensorShape
-from algorithm import parallelize
-
-alias type = DType.float32
-alias simd = simdwidthof[type]()
-
-fn compute_per_channel_max_abs(
-    abs_output_ptr: Pointer[type],
+@export("C")
+fn per_channel_max_abs_c(
+    abs_output: UnsafePointer[Float32],
     batch_size: Int,
     seq_len: Int,
     hidden_size: Int,
-    out_max_ptr: Pointer[type]
-) raises -> None:
-    """Compute per-channel max abs over batch and seq dimensions.
-    abs_output_ptr: flattened [batch * seq * hidden]
-    out_max_ptr: [hidden] 
-    Uses parallelization over channels for speed."""
-    
-    # Initialize out_max to 0.0 (abs values are non-negative)
+    out_max: UnsafePointer[Float32]
+) -> Int:
+    # Initialize to 0.0
     for i in range(hidden_size):
-        out_max_ptr.store(i, 0.0)
-    
-    @parameter
-    fn compute_channel_max(c: Int):
-        var c_max: type = 0.0
+        out_max.store(i, 0.0)
+
+    for c in range(hidden_size):
+        var c_max : Float32 = 0.0
         for b in range(batch_size):
             for s in range(seq_len):
                 var idx = (b * seq_len + s) * hidden_size + c
-                var val = abs_output_ptr.load(idx)
+                var val : Float32 = abs_output.load(idx)
                 if val > c_max:
                     c_max = val
-        out_max_ptr.store(c, c_max)
-    
-    # Parallelize over hidden channels
-    parallelize[compute_channel_max](range(hidden_size))
+        out_max.store(c, c_max)
 
-# For Python integration, use @value or @register_passable if needed
-# This can be called from Python via Mojo's Python API (mojo build -run-python or similar)
-# Placeholder for direct Python call; in practice, use Mojo's Python interop
+    return 0
 
-def main():
-    # Test placeholder
-    print("Mojo AWQ kernel ready")
+fn main():
+    print("Mojo AWQ C library ready")
