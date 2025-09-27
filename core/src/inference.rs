@@ -41,7 +41,7 @@ impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports phi-2 model.
     pub fn new(model_path: PathBuf, dtype: Option<DType>) -> Result<Self> {
-        let dtype = dtype.unwrap_or(DType::BF16);
+        let dtype = dtype.unwrap_or(DType::F32);
         let device = Device::Cpu;
 
         if !device.is_cuda() {
