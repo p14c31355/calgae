@@ -1,16 +1,31 @@
-def add(a: float32, b: float32) -> float32:
-    return a + b
+# High-performance matrix multiplication for LLM acceleration
+# Optimized for SIMD (Codon auto-vectorizes loops)
 
-def matrix_mult(A: List[List[float32]], B: List[List[float32]]) -> List[List[float32]]:
-    n = len(A)
-    p = len(B[0])
-    q = len(B)
-    C = [[0 for _ in range(p)] for _ in range(n)]
+def matrix_mult_c(
+    n: int32, p: int32, q: int32, 
+    a: Pointer[float32], b: Pointer[float32], 
+    c: Pointer[float32]
+) -> int32:
+    """FFI-compatible matrix mult: C = A * B, where A is n x q, B is q x p, C is n x p.
+    Flattened row-major arrays. Returns 0 on success."""
+    if n <= 0 or p <= 0 or q <= 0:
+        return -1
+    
+    # Initialize C to zero
+    for i in range(n * p):
+        c.store(i, 0.0)
+    
+    # Optimized loop with potential auto-SIMD
     for i in range(n):
         for j in range(p):
+            acc = 0.0
             for k in range(q):
-                C[i][j] += A[i][k] * B[k][j]
-    return C
+                acc += a.load(i * q + k) * b.load(k * p + j)
+            c.store(i * p + j, acc)
+    
+    return 0
 
-# FFI export for Rust call (Codon can generate C code)
-# Note: Compile with codon --embed-rt kernel.codon -o kernel.so for shared lib
+# C ABI export for Rust FFI
+extern(0) def matrix_mult_c(n: int32, p: int32, q: int32, a: Pointer[float32], b: Pointer[float32], c: Pointer[float32]) -> int32
+
+# Compile note: codon compile --embed-rt --opt-level=3 kernel.codon -o libkernel.so -lshared
