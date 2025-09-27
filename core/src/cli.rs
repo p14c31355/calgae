@@ -1,7 +1,10 @@
 use clap::Parser;
 
 #[derive(Parser, Debug)]
-#[command(name = "calgae-agent", about = "CLI Coding Agent using Candle LLM on CPU")]
+#[command(
+    name = "calgae-agent",
+    about = "CLI Coding Agent using Candle LLM on CPU"
+)]
 pub struct Args {
     #[arg(
         short,
@@ -13,9 +16,13 @@ pub struct Args {
     #[arg(short, long, default_value = "512")]
     pub tokens: usize,
 
-    #[arg(short, long, help = "Path to the model directory (HF format)", value_name = "PATH")]
+    #[arg(
+        short,
+        long,
+        help = "Path to the model directory (HF format)",
+        value_name = "PATH"
+    )]
     pub model: std::path::PathBuf,
-
     // #[arg(short, long, default_value_t = false, help = "Execute generated code and collect results")]
     // pub execute: bool,
 
