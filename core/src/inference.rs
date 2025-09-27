@@ -1,56 +1,67 @@
 #![warn(missing_docs)]
 
-//! LLM inference using rustformers/llm crate for lightweight, quantized CPU inference.
-//! Supports GGUF models with built-in quantization (Q4_0, Q8_0, etc.).
-//! Achieves high speed and low memory via no_std-safe design and mmap loading.
+//! Lightweight LLM inference using Candle for quantized CPU inference.
+//! Supports phi-2 model from HuggingFace with safetensors weights.
 
-use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use anyhow::{Result};
+use std::path::PathBuf;
+use std::sync::Arc;
+use log::info;
 
-use num_cpus;
+use candle_core::{Device, DType, Tensor};
+use candle_nn::VarBuilder;
+use candle_transformers::generation::{LogitsProcessor, SamplingMode, self};
+use candle_transformers::models::phi::{Config, Model as PhiModel};
+use tokenizers::Tokenizer;
 use thiserror::Error;
+use rand::prelude::*;
+use rand::rngs::StdRng;
 
-use llm::KnownModel;
-
-/// Custom errors for inference
 #[derive(Error, Debug)]
 pub enum InferenceError {
     #[error("Model load error: {0}")]
     ModelLoadError(#[from] anyhow::Error),
+    #[error("Tokenizer load error: {0}")]
+    TokenizerLoadError(#[from] tokenizers::Error),
     #[error("No output generated")]
     NoOutputError,
     #[error("Unsupported model format: {0}")]
     UnsupportedFormat(String),
 }
 
-/// Struct for lightweight LLM inference using llm crate
 pub struct LlmInference {
-    model: llm::Model,
-    quantized: bool,  // Flag for quantization status
+    model: Arc<PhiModel>,
+    tokenizer: Arc<Tokenizer>,
+    device: Device,
 }
 
 impl LlmInference {
-    /// Creates a new inference instance from a GGUF model file path.
-    /// Supports quantized models via GGUF format (e.g., tinyllama-q4.gguf).
-    pub fn new(model_path: PathBuf, _dtype: Option<()>) -> Result<Self> {
-        let path_str = model_path.to_string_lossy().to_string();
+    /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
+    /// Supports phi-2 model.
+    pub fn new(model_path: PathBuf, dtype: Option<DType>) -> Result<Self> {
+        let dtype = dtype.unwrap_or(DType::BF16);
+        let device = Device::Cpu;
 
-        // Check if it's GGUF file
-        if model_path.extension().map_or(false, |ext| ext == "gguf") {
-            let model = llm::load_from_file(KnownModel::TinyLlama, &path_str)
-                .context("Failed to load GGUF model")?;
-
-            let quantized = model_path.file_name()
-                .and_then(|name| name.to_str())
-                .map_or(false, |name| name.contains('q') || name.contains("quant"));
-
-            Ok(Self {
-                model,
-                quantized,
-            })
-        } else {
-            return Err(InferenceError::UnsupportedFormat("Only GGUF format supported. Use xtask fetch-gguf".to_string()).into());
+        if !device.is_cuda() {
+            info!("Warning: CUDA is not available, this example runs on CPU");
         }
+
+        let tokenizer_path = model_path.join("tokenizer.json");
+        let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(InferenceError::TokenizerLoadError)?;
+
+        let config = Config::phi_2();
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&[model_path.join("model.safetensors")], dtype, &device)
+            .map_err(anyhow::Error::msg)? };
+
+        let model = PhiModel::new(&config, vb)?;
+
+        info!("Model loaded successfully");
+
+        Ok(Self {
+            model: Arc::new(model),
+            tokenizer: Arc::new(tokenizer),
+            device,
+        })
     }
 
     /// Performs inference on the prompt, generating up to `max_tokens`.
@@ -63,35 +74,49 @@ impl LlmInference {
         top_k: usize,
         top_p: f32,
     ) -> Result<String> {
-        let session = self.model.start_session(Default::default());
+        let mut tokens = self.tokenizer.encode(prompt, true)?.get_ids().to_vec();
 
-        let mut req = llm::InferenceRequest::new();
-        req.prompt = prompt.to_string();
-        req.params = llm::InferenceParameters {
-            n_predict: max_tokens as i32,
-            n_threads: Some(num_cpus::get() as u32),
-            temperature: temperature as f32,
-            top_k: top_k as usize,
-            top_p: top_p as f32,
-            repeat_penalty: 1.1,
-            ..Default::default()
-        };
+        let mut logits_processor = LogitsProcessor::new(42u64, temperature.max(1e-8).into());
 
-        let mut output = String::new();
-        let mut stream = session.infer(req);
+        let mut generated = 0;
+        let seed = 42;
+        let mut rng = StdRng::seed_from_u64(seed as u64);
 
-        while let Some(token) = stream.next() {
-            match token {
-                Ok(token) => output.push_str(&token),
-                Err(_) => break,
+        let vocab_size = self.tokenizer.get_vocab(true).len();
+
+        while generated < max_tokens {
+            let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
+            let logits = self.model.forward(&input, 0i32)?;  // use 0 for causal mask offset
+            let logits = logits.squeeze(0)?.contiguous()?.to_dtype(DType::F32)?;
+
+            let logits_ref = logits.as_ref();
+            let next_token = logits_processor.sample_token(
+                logits_ref,
+                0,
+                top_k,
+                top_p,
+                None,
+                &mut rng,
+                vocab_size,
+            )?;
+
+            tokens.push(next_token);
+
+            let eos_token_id = self.tokenizer.token_to_id("<|endoftext|>") .unwrap_or(0);
+            if next_token == eos_token_id {
+                break;
             }
+
+            generated += 1;
         }
 
-        if output.trim().is_empty() {
+        let response = self.tokenizer.decode(&tokens, true)? .trim().to_string();
+
+        if response.is_empty() {
             return Err(InferenceError::NoOutputError.into());
         }
 
-        Ok(output.trim().to_string())
+        Ok(response)
     }
 }
 
