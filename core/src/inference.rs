@@ -104,8 +104,8 @@ impl LlmInference {
         })
     }
 
-    /// Performs inference on the prompt, generating up to `max_tokens`.
-    /// Uses greedy sampling for simplicity.
+    /// Performs efficient inference with KV cache: prefill prompt, then autoregressive decode.
+    /// Supports greedy sampling. Based on CPU-efficient LLM inference techniques.
     pub fn infer(
         &self,
         prompt: &str,
@@ -113,32 +113,40 @@ impl LlmInference {
     ) -> Result<String> {
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;
-        let prompt_len = encoding.get_ids().len();
-        let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
+        let prompt_tokens: Vec<u32> = encoding.get_ids().to_vec();
+        let prompt_len = prompt_tokens.len();
+
+        if prompt_len == 0 {
+            return Err(InferenceError::NoOutputError.into());
+        }
+
+        // Prefill: Compute KV cache for prompt
+        let prompt_input = Tensor::new(&prompt_tokens, &self.device)?.unsqueeze(0)?;
+        let prompt_pos_ids = Tensor::arange(0i64, prompt_len as i64, &self.device)?.unsqueeze(0)?;
+        let (prompt_logits, kv_cache) = self.model.forward_with_cache(&prompt_input, &prompt_pos_ids)?;
+
+        let mut generated_tokens = vec![];
+        let mut current_cache = kv_cache;
+        let mut current_pos = prompt_len as i64;
 
         for _ in 0..max_tokens {
-            let seq_len = tokens.len();
-            let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
-            let position_ids = Tensor::arange(0i64, seq_len as i64, &self.device)?.unsqueeze(0)?;
-            let logits = self.model.forward(&input, &position_ids)?;
-            let full_logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
-            let our_logits = full_logits.i((seq_len as i64 - 1) as i64)?.squeeze(0)?;
-            // Greedy sampling
-            let next_token = our_logits.argmax(DType::U32, &self.device)?.to_scalar::<u32>()?;
+            // Decode: Single token input (last token)
+            let last_token = Tensor::new(&[prompt_tokens.last().unwrap()], &self.device)?.unsqueeze(0)?;
+            let pos_id = Tensor::new(&[current_pos], &self.device)?.unsqueeze(0)?;
+            let (logits, new_cache) = self.model.forward_with_cache(&last_token, &pos_id, Some(&current_cache))?;
+            current_cache = new_cache;
 
-            tokens.push(next_token);
+            let logits_f32 = logits.squeeze(0)?.to_dtype(DType::F32)?;
+            let next_token = logits_f32.argmax(DType::U32, &self.device)?.to_scalar::<u32>()?;
+            generated_tokens.push(next_token);
+            current_pos += 1;
 
             if next_token == self.eos_token_id {
                 break;
             }
         }
 
-        if tokens.len() <= prompt_len {
-            return Err(InferenceError::NoOutputError.into());
-        }
-
-        let generated_tokens = &tokens[prompt_len..];
-        let response = self.tokenizer.decode(generated_tokens, true)
+        let response = self.tokenizer.decode(&generated_tokens, true)
             .map_err(|e| anyhow!("Tokenizer decode error: {}", e))?;
 
         let response = response.trim().to_string();

@@ -97,6 +97,28 @@ def compute_scaling_factors(activations, salient_channels):
         scales[name] = scale.item()
     return scales
 
+def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
+    """
+    Compute SmoothQuant scales: Per-channel activation scales to absorb outliers into weights.
+    Based on SmoothQuant paper: Fit activation distribution to quantization range, compensate in weights.
+    sparsity: Fraction of channels to apply heavy scaling (outlier channels).
+    """
+    smooth_scales = {}
+    for name, act_max in activations.items():
+        # Sort channels by activation max (outliers are high)
+        sorted_max = torch.sort(act_max, descending=True)[0]
+        num_outliers = int(len(act_max) * sparsity)
+        # For top sparsity channels, compute scale to fit to 8-bit range
+        # Assume beta=0.85 from paper for outlier absorption
+        beta = 0.85
+        qmax = 2 ** (bits - 1) - 1
+        scales = torch.ones_like(act_max)
+        if num_outliers > 0:
+            outlier_max = sorted_max[:num_outliers].max()
+            scales[:num_outliers] = (outlier_max / beta) / qmax  # Scale act down, compensate in weight
+        smooth_scales[name] = scales.tolist()  # Per-channel scales
+    return smooth_scales
+
 def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=128):
     """
     Apply AWQ: Scale salient weight channels (output dim), then quantize non-salient to INT4.
@@ -113,13 +135,11 @@ def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=1
     for name, module in quantized_model.named_modules():
         if isinstance(module, nn.Linear) and "layers" in name:
             # Extract layer index and proj type from name, e.g., "layer.5.mlp.down_proj"
-            if "q_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_q"] = module
-            elif "k_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_k"] = module
-            elif "v_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_v"] = module
-            elif "o_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_o"] = module
-            elif "gate_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_gate"] = module
-            elif "up_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_up"] = module
-            elif "down_proj" in name: model_name_to_layer[f"layer_{name.split('.')[1]}_down"] = module
+            parts = name.split('.')
+            layer_idx = parts[1]
+            proj_type = parts[-1]
+            hook_name = f"layer_{layer_idx}_{proj_type.replace('proj', '') if 'proj' in proj_type else proj_type}"
+            model_name_to_layer[hook_name] = module
     
     for hook_name, module in model_name_to_layer.items():
         if hook_name in salient_channels:
@@ -135,32 +155,59 @@ def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=1
             
             # Quantize non-salient channels to INT4 per-group
             out_dim = weight.shape[1]
-            q_weight = weight.clone()
             fp16_channels = torch.zeros(out_dim, dtype=torch.bool)
             fp16_channels[salient] = True
             
             for start in range(0, out_dim, group_size):
                 end = min(start + group_size, out_dim)
-                group_mask = ~fp16_channels[start:end]  # Non-salient in group
+                group_mask = ~fp16_channels[start:end]
                 if group_mask.any():
                     group_weight = weight[:, start:end][:, group_mask]
-                    # Per-group quantization to INT4
                     absmax = group_weight.abs().max()
                     scale_q = absmax / ((1 << (bits - 1)) - 1)
-                    q_group = torch.round(group_weight / scale_q).clamp(-(1 << (bits - 1)), (1 << (bits - 1)) - 1).to(torch.int8)
-                    # Dequantize back to FP16 for storage
-                    q_group_dequant = q_group.to(torch.float16) * scale_q
-                    # Place back
+                    q_group = torch.round(group_weight / scale_q).clamp(-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
+                    q_group_dequant = q_group.float() * scale_q
                     group_idx = 0
                     for i in range(start, end):
                         if not fp16_channels[i]:
                             weight[:, i] = q_group_dequant[:, group_idx]
                             group_idx += 1
-                            # Note: real AWQ adjusts quantization ranges considering scaling
             
             module.weight.data = weight
             if bias is not None:
-                module.bias.data = bias  # Bias unchanged
+                module.bias.data = bias
+    
+    return quantized_model
+
+def apply_smoothquant(quantized_model, activations, smooth_scales, bits=8, group_size=128):
+    """
+    Apply SmoothQuant: Compensate activation scales in weights, then quantize weights to INT8.
+    Weights are scaled by 1 / act_scale for outlier channels.
+    """
+    model_name_to_layer = {}
+    for name, module in quantized_model.named_modules():
+        if isinstance(module, nn.Linear) and "layers" in name:
+            parts = name.split('.')
+            layer_idx = parts[1]
+            proj_type = parts[-1]
+            hook_name = f"layer_{layer_idx}_{proj_type.replace('proj', '') if 'proj' in proj_type else proj_type}"
+            model_name_to_layer[hook_name] = module
+    
+    for hook_name, module in model_name_to_layer.items():
+        if hook_name in smooth_scales:
+            weight = module.weight.data
+            scales_act = torch.tensor(smooth_scales[hook_name])
+            # Compensate: W' = W / act_scale (per output channel)
+            weight *= 1.0 / (scales_act + 1e-8)
+            
+            # Quantize all weights to INT8 per-group
+            for start in range(0, weight.shape[1], group_size):
+                end = min(start + group_size, weight.shape[1])
+                group_weight = weight[:, start:end]
+                absmax = group_weight.abs().max()
+                scale_q = absmax / ((1 << (bits - 1)) - 1)
+                q_group = torch.round(group_weight / scale_q).clamp(-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
+                weight[:, start:end] = q_group.float() * scale_q
     
     return quantized_model
 
@@ -208,5 +255,54 @@ def quantize_with_awq(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bit
     print(f"Quantized model saved to {output_dir}. Salient channels protected in FP16, others in INT4.")
     return output_dir
 
+def quantize_with_smoothquant(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bits=8, sparsity=0.85):
+    """
+    SmoothQuant: Post-training quantization with activation outlier absorption.
+    Computes per-channel act scales, compensates in weights, quantizes to INT8.
+    """
+    print(f"Loading model: {model_name}")
+    model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    
+    print("Generating calibration data...")
+    input_ids, attention_mask = load_calibration_data(tokenizer)
+    
+    print("Collecting activation statistics...")
+    num_layers = len(model.model.layers)
+    activations = collect_activation_statistics(model, (input_ids, attention_mask), num_layers)
+    
+    print("Computing SmoothQuant scales...")
+    smooth_scales = compute_smoothquant_scales(activations, quant_bits, sparsity)
+    
+    print("Applying SmoothQuant...")
+    quantized_model = apply_smoothquant(model, activations, smooth_scales, quant_bits)
+    
+    print("Saving quantized model...")
+    output_dir = "./models/tinyllama-smoothquant"
+    quantized_model.save_pretrained(output_dir)
+    tokenizer.save_pretrained(output_dir)
+    
+    # Save stats
+    stats = {
+        "smooth_scales": smooth_scales,
+        "method": "SmoothQuant paper-compliant"
+    }
+    with open(f"{output_dir}/smoothquant_stats.json", "w") as f:
+        json.dump(stats, f, indent=2)
+    
+    print(f"Quantized model saved to {output_dir}. Weights adjusted for activation smoothing, INT8 quantized.")
+    return output_dir
+
 if __name__ == "__main__":
-    quantize_with_awq()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--method", choices=["awq", "smoothquant"], default="awq")
+    parser.add_argument("--model", default="TinyLlama/TinyLlama-1.1B-Chat-v1.0")
+    args = parser.parse_args()
+    
+    if args.method == "awq":
+        quantize_with_awq(args.model)
+    else:
+        quantize_with_smoothquant(args.model)

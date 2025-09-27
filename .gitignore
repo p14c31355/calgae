@@ -1,5 +1,4 @@
 # Ignore model binaries (too large for git)
-models/*
 !models/.gitkeep
 
 # Build artifacts
@@ -33,20 +32,6 @@ _build/
 .lean-tags/
 lean_dep/
 lean4-build/
-
-# Engine (llama.cpp)
-engine/build/
-engine/ggml/
-engine/CMakeCache.txt
-engine/CMakeFiles/
-engine/tests/*.bin
-engine/*.log
-
-# Model files
-*.gguf
-*.bin
-*.safetensors
-
 
 # IDE and editor files
 *.swp
