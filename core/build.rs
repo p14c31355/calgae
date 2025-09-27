@@ -7,7 +7,8 @@ use std::fs;
 use std::path::PathBuf;
 
 use hf_hub::api::sync::Api;
-use hf_hub::RepoContents;
+use hf_hub::Repo;
+use hf_hub::RepoType;
 
 fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
@@ -24,20 +25,17 @@ fn main() {
 
     // Download TinyLlama model from HF
     let api = Api::new().expect("Failed to create HF API");
-    let repo = api.repo("microsoft/TinyLlama-1.1B-Chat-v1.0");
+    let repo_obj = Repo::new("microsoft/TinyLlama-1.1B-Chat-v1.0".to_string(), RepoType::Model);
+    let repo = api.repo(repo_obj);
 
     // Download key files
     let files = vec!["config.json", "tokenizer.json"];
     for file in files {
         let path = model_dir.join(file);
         if !path.exists() {
-            let contents = repo.get(file).expect("Failed to get file");
-            match contents {
-                RepoContents::File { data, .. } | RepoContents::Bytes { data, .. } => {
-                    fs::write(&path, data).expect("Failed to write model file");
-                }
-                _ => eprintln!("Unexpected content type for {}", file),
-            }
+            let local_path = repo.get(file).expect("Failed to get file");
+            let contents = std::fs::read(&local_path).expect("Failed to read local file");
+            fs::write(&path, &contents).expect("Failed to write model file");
         }
     }
 
@@ -46,13 +44,9 @@ fn main() {
     for file in weight_files {
         let path = model_dir.join(file);
         if !path.exists() {
-            let contents = repo.get(file).expect("Failed to get weight file");
-            match contents {
-                RepoContents::File { data, .. } | RepoContents::Bytes { data, .. } => {
-                    fs::write(&path, data).expect("Failed to write weight file");
-                }
-                _ => eprintln!("Unexpected content type for {}", file),
-            }
+            let local_path = repo.get(file).expect("Failed to get weight file");
+            let contents = std::fs::read(&local_path).expect("Failed to read local weight file");
+            fs::write(&path, &contents).expect("Failed to write weight file");
         }
     }
 
