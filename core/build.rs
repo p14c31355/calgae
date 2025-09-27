@@ -50,49 +50,6 @@ fn main() {
     println!("cargo:rerun-if-changed=../engine/");
     println!("cargo:rerun-if-changed=../engine/llama.h");
 
-    // Async spawn heavy tasks: AWQ quantization via python script
-    // This runs in background, doesn't block cargo build
-    std::thread::spawn(|| {
-        let status = std::process::Command::new("python")
-            .arg("scripts/awq_tinyllama.py")
-            .status();
-        if let Ok(s) = status {
-            if !s.success() {
-                eprintln!("Warning: AWQ quantization failed in background");
-            }
-        } else {
-            eprintln!("Warning: Failed to run AWQ quantization");
-        }
-    });
-
-    // Async spawn for Codon optimization
-    std::thread::spawn(|| {
-        let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| ".".to_string());
-        let status = std::process::Command::new("codon")
-            .args(["run", "ml/codon/optimize.py", "-o", out_dir.as_str()])
-            .status();
-        if let Ok(s) = status {
-            if !s.success() {
-                eprintln!("Warning: Codon optimization failed in background");
-            }
-        } else {
-            eprintln!("Warning: Failed to run Codon optimization (codon not installed?)");
-        }
-    });
-
-    // Async spawn for Mojo kernel build
-    std::thread::spawn(|| {
-        let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| ".".to_string());
-        let status = std::process::Command::new("mojo")
-            .args(["build", "ml/mojo/kernels.mojo", "-o", &format!("{}/kernels", out_dir)])
-            .status();
-        if let Ok(s) = status {
-            if !s.success() {
-                eprintln!("Warning: Mojo build failed in background");
-            }
-        } else {
-            eprintln!("Warning: Failed to run Mojo build (mojo not installed?)");
-        }
-    });
-
+    println!("cargo:rerun-if-changed=../engine/");
+    println!("cargo:rerun-if-changed=../engine/llama.h");
 }
