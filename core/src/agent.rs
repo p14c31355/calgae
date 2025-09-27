@@ -4,7 +4,7 @@ use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
 use std::fs::File;
-use std::io::Write;
+use std::io::{self, BufRead, Write};
 use std::process;
 use std::sync::Arc;
 use tempfile::Builder;
@@ -24,15 +24,20 @@ fn use_codon_kernel(a: &[f32], b: &[f32]) -> Vec<f32> {
     c
 }
 
+pub trait AccelerationPlugin {
+    fn accelerate(&self, input: &[f32], op: &str) -> Vec<f32>;
+}
+
 #[derive(Clone)]
 pub struct Agent {
     inference: Arc<LlmInference>,
+    plugins: Vec<Arc<dyn AccelerationPlugin + Send + Sync>>,  // Integrated plugin system
 }
 
 impl Agent {
     pub async fn new(model: std::path::PathBuf) -> AnyhowResult<Self> {
         let inference = Arc::new(LlmInference::new(model, None)?);
-        Ok(Agent { inference })
+        Ok(Agent { inference, plugins: Vec::new() })
     }
 
     async fn infer_async(

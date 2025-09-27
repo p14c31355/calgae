@@ -1,134 +1,83 @@
-# calgae
-Calc Algae - self made LLM project (experimental)
+# Calgae: Lightweight LLM Runtime and Model Stack
 
-## Project Structure
+Calgae is a high-speed, resource-efficient LLM runtime built with modern safe systems languages: Rust, Zig, Mojo, Codon, and Lean4. It prioritizes quantization, distillation, and formal verification for safe, portable inference on CPU.
 
-```
-├── core/               # Main orchestrator in Rust
-├── runtime/            # Zig layer (FFI / OS)
-├── proof/              # Lean4: math proof experimental
-├── ml/                 # Mojo / Codon: calculate and machine-learning experimental
-│   ├── mojo/
-│   │   └── kernels.mojo   # HPC based calc kernel
-│   └── codon/
-│       └── optimize.py    # LLVM tuning calc by codon
-├── engine/             # llama.cpp (submodule or clone)
-├── models/             # model (quantization OK)
-├── scripts/            # builder and runner
-│   ├── build_all.sh
-│   └── run_cpu_llm.sh
-└── README.md
-```
+## Features
 
-## Prerequisites
+- **Efficient Inference**: Candle-based Rust runtime supporting quantized models (int4/int8).
+- **Acceleration Plugins**: Integrated kernels in Zig, Codon, and Mojo for SIMD-optimized matmul and GEMM.
+- **Formal Verification**: Lean4 proofs for quantization correctness.
+- **Plugin System**: Unified runtime for Mojo/Codon/Zig acceleration.
+- **Quantization Tools**: AWQ scripting for TinyLlama and similar models.
 
-### Rust
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh && source ~/.cargo/env
-```
-Note: To make the PATH permanent, add `source ~/.cargo/env` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
+## Installation
 
-### Zig
-```bash
-wget https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz && tar -xf zig-linux-x86_64-0.13.0.tar.xz && mv zig-linux-x86_64-0.13.0 ~/.local/zig && export PATH=$PATH:~/.local/zig
-```
-Note: To make the PATH permanent, add `export PATH=$PATH:~/.local/zig` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
+1. Clone the repo:
+   ```
+   git clone https://github.com/p14c31355/calgae.git
+   cd calgae
+   ```
 
-### Lean4
-```bash
-curl -O https://raw.githubusercontent.com/leanprover/lean4/master/scripts/install_ubuntu.sh
-# ... inspect the script ...
-sh install_ubuntu.sh
-export PATH=$PATH:$HOME/.elan/bin
-```
-Note: To make the PATH permanent, add `export PATH=$PATH:$HOME/.elan/bin` to your shell configuration file (e.g., ~/.bashrc or ~/.zshrc) and then source it or open a new terminal.
+2. Install dependencies:
+   - Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+   - Zig: `curl https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz | tar xvf -`
+   - Codon: Download from https://codon.com
+   - Mojo: Install from https://www.modular.com/mojo
+   - Lean4: Follow https://lean-lang.org/lean4/doc/quickstart.html
 
-### Mojo
-```bash
-# Create Modular account and follow https://developer.modular.com/download
-pip install modular && modular install mojo
-```
+3. Build:
+   ```
+   cd core
+   cargo build --release
+   ```
 
-### Codon
-```bash
-pip install codon
-```
-
-### Other dependencies
-```bash
-sudo apt update && sudo apt install cmake build-essential git wget curl python3-pip python3.12-venv
-```
-
-## Setup
-
-1. Clone the repository:
-```bash
-git clone https://github.com/p14c31355/calgae.git
-cd calgae
-```
-
-2. Setup dependencies and fetch model using xtask:
-```bash
-cargo run --bin xtask -- setup
-cargo run --bin xtask -- fetch-model  # Downloads safetensors model to models/tinyllama
-```
+4. Download a model:
+   ```
+   cargo run --bin xtask -- fetch-model --model TinyLlama/TinyLlama-1.1B-Chat-v1.0
+   ```
 
 ## Usage
 
-### Rust Agent
-```bash
-cargo run --model models/tinyllama --prompt "Generate a Rust function to compute fibonacci sequence"
+Run the agent:
+```
+cargo run --bin calgae -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust" --tokens 128 --temperature 0.7 --execute true --interactive
 ```
 
-### Zig Runtime
-```bash
-cd runtime && zig build-exe src/runtime.zig
-./runtime zig
+- `--model`: Path to GGUF or Safetensors model.
+- `--prompt`: Input prompt.
+- `--tokens`: Max generation length.
+- `--temperature`: Sampling temperature.
+- `--top_k`: Top-k sampling.
+- `--top_p`: Top-p sampling.
+- `--execute`: Compile and run generated code.
+- `--interactive`: Interactive mode.
+
+## Architecture
+
+- **Core (Rust)**: LLM inference with Candle, agent orchestrator.
+- **Runtime (Zig)**: SIMD kernels (matmul).
+- **ML (Codon/Mojo)**: Accelerated computation kernels.
+- **Proof (Lean4)**: Formal verification of quantization.
+- **LLM-Compressor**: Python AWQ quantization scripts.
+
+## Quantumization
+
+Use `llm-compressor/awq.py` to quantize models:
+```
+cd llm-compressor
+python awq.py
 ```
 
+Requires AutoAWQ in virtual environment.
 
-### Lean4 Verification
-```bash
-cd proof && lake build
-```
+## Contributing
 
-### Mojo Kernel
-```bash
-cd ml/mojo && mojo kernels.mojo
-```
+- Add new acceleration plugins in `core/src/agent.rs`.
+- Extend proofs in `proof/src/`.
+- Optimize kernels in `ml/` and `runtime/`.
 
-### Codon Optimized
-```bash
-cd ml/codon && python optimize.py
-```
+For publication, consider crates.io for Rust components and GitHub releases for the full stack.
 
-## Inference with TinyLlama
-```bash
-cargo run --model models/tinyllama --prompt "Hello, my name is" --tokens 50
-```
+## License
 
-## AWQ Quantization
-To quantize other models, clone and follow AWQ repo instructions.
-
-## EdgeProfiler Benchmark
-```bash
-# Download and install EdgeProfiler separately
-mkdir -p tools && git clone https://github.com/ruoyuliu/EdgeProfiler.git tools/edgeprofiler && cd tools/edgeprofiler && pip install -r requirements.txt
-# Run benchmark
-python -m edgeprofiler.benchmark --model_path ../../models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf --backend llama.cpp
-```
-Note: The `tools/` directory is included in `.gitignore` to avoid committing downloaded tools.
-
-## 5-Second Quick Start Demo
-
-After cloning, the following commands complete the setup and execution (model download may take time on first run).
-
-```bash
-git clone https://github.com/p14c31355/calgae.git
-cd calgae
-cargo run --bin xtask -- setup
-cargo run --bin xtask -- fetch-model  # Fetch model (first time only)
-cargo run --model models/tinyllama --prompt "Generate a Rust function to compute fibonacci sequence"  # Run LLM (default prompt for Rust code generation)
-```
-
-This will run the basic LLM inference and code generation in Calgae!
+MIT / Apache-2.0 (see LICENSE files).
