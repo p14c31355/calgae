@@ -27,7 +27,9 @@ fn main() {
     // Assume libzig_kernel.so is generated in runtime/
     let zig_lib_source = PathBuf::from("runtime").join("libzig_kernel.so");
     if zig_lib_source.exists() {
-        fs::copy(&zig_lib_source, out_dir.join(&zig_lib_source)).ok();
+        if let Err(e) = fs::copy(&zig_lib_source, out_dir.join("libzig_kernel.so")) {
+            println!("cargo:warning=Failed to copy zig library: {}", e);
+        }
     }
 
     // Compile Codon to shared library for acceleration
@@ -40,7 +42,9 @@ fn main() {
         if status.success() {
             let codon_lib_source = PathBuf::from("libcodon_kernel.so");
             if codon_lib_source.exists() {
-                fs::copy(&codon_lib_source, out_dir.join(&codon_lib_source)).ok();
+                if let Err(e) = fs::copy(&codon_lib_source, out_dir.join("libcodon_kernel.so")) {
+                    println!("cargo:warning=Failed to copy codon library: {}", e);
+                }
                 println!("cargo:rustc-link-search=native={}", out_dir.display());
                 println!("cargo:rustc-link-lib=codon_kernel");
             }
