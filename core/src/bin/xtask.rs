@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
             let codon_status = codon??;
             let mojo_status = mojo??;
 
-            if codon_status.is_ok() && codon_status.as_ref().unwrap().success() && mojo_status.is_ok() && mojo_status.as_ref().unwrap().success() {
+            if codon_status.success() && mojo_status.success() {
                 println!("All preparations completed.");
             } else {
                 anyhow::bail!("Some preparation tasks failed.");
@@ -150,12 +150,15 @@ async fn main() -> Result<()> {
                     .await?;
                 if wget_zig.success() {
                     let tar_zig = AsyncCommand::new("tar")
-                        .args(["-xvf", format!("zig-linux-x86_64-{}.tar.xz", zig_version)])
+                        .arg("-xvf")
+                        .arg(format!("zig-linux-x86_64-{}.tar.xz", zig_version))
                         .status()
                     .await?;
                     if tar_zig.success() {
                         let mv_zig = AsyncCommand::new("sudo")
-                            .args(["mv", format!("zig-linux-x86_64-{}", zig_version), "/usr/local/"])
+                            .arg("mv")
+                            .arg(format!("zig-linux-x86_64-{}", zig_version))
+                            .arg("/usr/local/")
                             .status()
                             .await?;
                         if mv_zig.success() {
@@ -294,7 +297,8 @@ async fn main() -> Result<()> {
             }
 
             let setup = AsyncCommand::new("bash")
-                .args(["-c", format!("cd {} && [ -d venv ] || python3 -m venv venv && source venv/bin/activate && pip install -e .", compressor_dir)])
+                .arg("-c")
+                .arg(format!("cd {} && [ -d venv ] || python3 -m venv venv && source venv/bin/activate && pip install -e .", compressor_dir))
                 .status()
                 .await?;
             if !setup.success() {
@@ -302,7 +306,8 @@ async fn main() -> Result<()> {
             }
 
             let awq = AsyncCommand::new("bash")
-                .args(["-c", format!("cd {} && source venv/bin/activate && python -m llmcompressor.awq --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --q_bits 4 --q_group_size 128 --dump_awq tinyllama_awq.pt", compressor_dir)])
+                .arg("-c")
+                .arg(format!("cd {} && source venv/bin/activate && python -m llmcompressor.awq --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --q_bits 4 --q_group_size 128 --dump_awq tinyllama_awq.pt", compressor_dir))
                 .status()
                 .await?;
             if awq.success() {
