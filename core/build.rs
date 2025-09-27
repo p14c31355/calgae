@@ -12,7 +12,7 @@ fn main() {
     
     // Compile Zig to shared library
     let status = Command::new("zig")
-        .args(&["build-lib", "-O", "ReleaseSmall", "runtime/src/runtime.zig", "-dynamic", "--name", "zig_kernel"])
+        .args(&["build-lib", "-O", "ReleaseSmall", "src/zig_kernel.zig", "-dynamic"])
         .current_dir("runtime")
         .status();
 
