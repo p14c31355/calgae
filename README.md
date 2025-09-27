@@ -60,7 +60,7 @@ cargo run -- --model models/tinyllama.gguf --prompt "Write a hello world in Rust
 - **Proof (Lean4)**: Formal verification of quantization.
 - **LLM-Compressor**: Python AWQ quantization scripts.
 
-## Quantumization
+## Quantization
 
 Use `llm-compressor/awq.py` to quantize models:
 ```
