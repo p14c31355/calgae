@@ -35,9 +35,9 @@ impl From<InferenceError> for AgentError {
 }
 
 impl Agent {
-    pub fn new(llama_bin: &std::path::Path, model: &std::path::Path) -> Self {
-        let inference = LlmInference::new(llama_bin.to_path_buf(), model.to_path_buf());
-        Agent { inference }
+    pub fn new(model: &std::path::Path) -> Result<Self, AgentError> {
+        let inference = LlmInference::new(model.to_path_buf()).map_err(AgentError::Inference)?;
+        Ok(Agent { inference })
     }
 
     pub fn generate_code(&self, args: &Args) -> Result<String, AgentError> {
@@ -71,7 +71,7 @@ impl Agent {
 }
 
 pub fn run_agent(args: &Args) -> Result<(), AgentError> {
-    let agent = Agent::new(&args.llama_bin, args.model.clone())?;
+    let agent = Agent::new(&args.model)?;
     let result = agent.generate_code(args)?;
     println!("{}", result);
     Ok(())
