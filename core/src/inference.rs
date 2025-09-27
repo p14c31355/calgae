@@ -5,6 +5,7 @@ use anyhow::{Context, Result};
 use candle_core::{Device, DType, IndexOp, Tensor};
 use candle_nn::VarBuilder;
 use candle_transformers::models::llama::{Cache, Config, Llama};
+use candle_transformers::generation::{LogitsProcessor, Sampling};
 use std::path::{Path, PathBuf};
 use tokenizers::tokenizer::Tokenizer;
 
@@ -13,8 +14,6 @@ use std::fs;
 
 use rand::prelude::*;
 use rand::rngs::ThreadRng;
-use candle_nn::ops::softmax;
-use candle_core::D;
 
 use thiserror::Error;
 
@@ -200,83 +199,31 @@ impl LlmInference {
         temperature: f32,
         top_k: usize,
         top_p: f32,
-        rng: &mut ThreadRng,
+        _rng: &mut ThreadRng,
     ) -> Result<u32> {
-        if temperature == 0.0 {
-            let next = logits.argmax(0)?.to_scalar::<i64>()? as u32;
-            return Ok(next);
-        }
-
-        let temp_tensor = Tensor::new(&[temperature], logits.device())?;
-        let scaled = (logits / &temp_tensor)?;
-        let probs = softmax(&scaled, D::Minus1)?;
-        let probs_v: Vec<f32> = probs.to_vec1::<f32>()?;
-
-        let mut probs_copy = probs_v.clone();
-
-        // Top-k sampling
-        if top_k > 0 {
-            let mut sorted: Vec<(usize, f32)> = probs_copy.iter().enumerate().map(|(i, &p)| (i, p)).collect();
-            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            let cut = std::cmp::min(top_k, sorted.len());
-            let mut new_probs = vec![0.0f32; probs_copy.len()];
-            let mut sum_p = 0.0f32;
-            for i in 0..cut {
-                new_probs[sorted[i].0] = sorted[i].1;
-                sum_p += sorted[i].1;
+        let seed = 42u64;
+        let temp = temperature as f64;
+        let sampling = if temperature == 0.0 {
+            Sampling::ArgMax
+        } else if top_k == 0 {
+            Sampling::TopP {
+                p: top_p as f64,
+                temperature: temp,
             }
-            if sum_p > 0.0 {
-                for p in new_probs.iter_mut() {
-                    *p /= sum_p;
-                }
+        } else if top_p >= 1.0 {
+            Sampling::TopK {
+                k: top_k,
+                temperature: temp,
             }
-            probs_copy = new_probs;
-        }
-
-        // Top-p sampling
-        if top_p < 1.0 {
-            let mut sorted: Vec<(usize, f32)> = probs_copy.iter().enumerate().map(|(i, &p)| (i, p)).collect();
-            sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-            let mut cum = 0.0f32;
-            let mut cut = sorted.len();
-            for i in 0..sorted.len() {
-                cum += sorted[i].1;
-                if cum > top_p {
-                    cut = i + 1;
-                    break;
-                }
+        } else {
+            Sampling::TopKThenTopP {
+                k: top_k,
+                p: top_p as f64,
+                temperature: temp,
             }
-            let mut new_probs = vec![0.0f32; probs_copy.len()];
-            let mut sum_p = 0.0f32;
-            for i in 0..cut {
-                new_probs[sorted[i].0] = sorted[i].1;
-                sum_p += sorted[i].1;
-            }
-            if sum_p > 0.0 {
-                for p in new_probs.iter_mut() {
-                    *p /= sum_p;
-                }
-            }
-            probs_copy = new_probs;
-        }
-
-        // Manual weighted sampling to avoid dependency issues
-        let mut cumsum = 0.0f32;
-        let mut cumprobs = vec![0.0f32; probs_copy.len()];
-        for (i, &p) in probs_copy.iter().enumerate() {
-            cumsum += p;
-            cumprobs[i] = cumsum;
-        }
-        if cumsum == 0.0 {
-            return Err(anyhow::anyhow!("Invalid probabilities: sum to zero"));
-        }
-        let r = rng.random_range(0.0f32..cumsum);
-        for (i, &cum) in cumprobs.iter().enumerate() {
-            if r < cum {
-                return Ok(i as u32);
-            }
-        }
-        Ok((probs_copy.len() - 1) as u32) // Fallback
+        };
+        let mut processor = LogitsProcessor::from_sampling(seed, sampling);
+        Ok(processor.sample(logits)?)
     }
 }
 

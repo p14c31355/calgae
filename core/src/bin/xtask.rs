@@ -222,28 +222,43 @@ async fn main() -> Result<()> {
         },
 
         Commands::FetchModel => {
-            println!("Fetching TinyLlama model...");
+            println!("Fetching TinyLlama model in safetensors format...");
 
-            let model_url = "https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
-            let model_path = "models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf";
+            let model_dir = Path::new("models/tinyllama");
+            fs::create_dir_all(model_dir)?;
 
-            fs::create_dir_all("models")?;
+            let files = vec![
+                ("config.json", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/config.json"),
+                ("tokenizer.json", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json"),
+                ("model.safetensors", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors"),
+            ];
 
-            if !Path::new(model_path).exists() {
-                println!("Downloading model...");
-                let wget = AsyncCommand::new("wget")
-                    .args(["-O", model_path, model_url])
-                    .status()
-                    .await?;
-                if !wget.success() {
-                    anyhow::bail!("Download failed.");
+            let mut all_success = true;
+            for (filename, url) in files {
+                let file_path = model_dir.join(filename);
+                if !file_path.exists() {
+                    println!("Downloading {}...", filename);
+                    let wget = AsyncCommand::new("wget")
+                        .args(["-O", file_path.to_str().unwrap(), url])
+                        .status()
+                        .await?;
+                    if !wget.success() {
+                        eprintln!("Failed to download {} from {}.", filename, url);
+                        all_success = false;
+                    } else {
+                        println!("Downloaded {} to {}.", filename, file_path.display());
+                    }
+                } else {
+                    println!("{} already exists at {}.", filename, file_path.display());
                 }
-                println!("Model downloaded to {}.", model_path);
-            } else {
-                println!("Model already exists.");
             }
 
-            Ok(())
+            if all_success {
+                println!("TinyLlama model downloaded successfully to {}.", model_dir.display());
+                Ok(())
+            } else {
+                anyhow::bail!("One or more files failed to download.");
+            }
         },
 
         Commands::AwqQuantize => {
