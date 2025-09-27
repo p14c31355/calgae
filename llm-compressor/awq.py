@@ -6,6 +6,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import numpy as np
 from typing import Dict, List, Any
 import json
+import ctypes
+import os
+import platform
+import time
 
 def load_calibration_data(tokenizer, num_samples=128, max_length=2048):
     """
@@ -33,14 +37,15 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
     model.eval()
     activations = {}  # Dict of layer_name: tensor of per-channel max abs act
     hooks = []
-    
+
+    # Fallback to torch for channel max since Mojo load failed
     def hook_fn(name):
         def hook(module, input, output):
             if isinstance(output, tuple):
                 output = output[0]
-            # Per-output-channel max abs over seq and batch dims
-            act_abs = torch.abs(output)
-            channel_max = torch.max(act_abs, dim=-2, keepdim=True)[0].max(dim=0)[0]  # Max over seq, then batch
+            act_abs = torch.abs(output).float()
+            batch_size, seq_len, hidden_size = act_abs.shape
+            channel_max = torch.max(act_abs.view(batch_size * seq_len, hidden_size), dim=0)[0].cpu()
             if name not in activations:
                 activations[name] = channel_max
             else:
@@ -77,24 +82,49 @@ def find_salient_channels(activations, top_k_percent=0.001):
     """
     Identify top-k% salient output channels per layer based on max abs activation.
     """
+    if mojo_lib:
+        lib = mojo_lib
+    else:
+        lib = None
+
     salient_channels = {}
-    for name, act_max in activations.items():
-        sorted_indices = torch.argsort(act_max, descending=True)
-        num_salient = max(1, int(len(act_max) * top_k_percent))
-        salient_channels[name] = sorted_indices[:num_salient].tolist()
+    for name, act_max_torch in activations.items():
+        act_max = act_max_torch.numpy().astype(np.float32)
+        hidden_size = len(act_max)
+        num_salient = max(1, int(hidden_size * top_k_percent))
+        indices = np.zeros(num_salient, dtype=np.int32)
+        if lib:
+            lib.top_k_indices_c(act_max, hidden_size, num_salient, indices)
+        else:
+            sorted_indices = torch.argsort(act_max_torch, descending=True)
+            indices = sorted_indices[:num_salient].numpy()
+        salient_channels[name] = indices.tolist()
     return salient_channels
 
 def compute_scaling_factors(activations, salient_channels):
     """
     Compute per-layer scale: max_all_act / max_salient_act to scale up salient channels.
     """
+    if mojo_lib:
+        lib = mojo_lib
+    else:
+        lib = None
+
     scales = {}
-    for name, act_max in activations.items():
-        salient_indices = torch.tensor(salient_channels[name])
-        salient_max = torch.max(act_max[salient_indices])
-        overall_max = torch.max(act_max)
-        scale = overall_max / (salient_max + 1e-8)
-        scales[name] = scale.item()
+    for name, act_max_torch in activations.items():
+        act_max = act_max_torch.numpy().astype(np.float32)
+        hidden_size = len(act_max)
+        salient_indices = np.array(salient_channels[name], dtype=np.int32)
+        num_salient = len(salient_indices)
+        scale_out = np.zeros(1, dtype=np.float32)
+        if lib:
+            lib.compute_scale_c(act_max, hidden_size, salient_indices, num_salient, scale_out)
+            scale = scale_out[0]
+        else:
+            salient_max = torch.max(act_max_torch[salient_indices])
+            overall_max = torch.max(act_max_torch)
+            scale = overall_max / (salient_max + 1e-8)
+        scales[name] = float(scale)
     return scales
 
 def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
@@ -226,15 +256,21 @@ def quantize_with_awq(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bit
     input_ids, attention_mask = load_calibration_data(tokenizer)
     
     print("Collecting activation statistics...")
+    start_collect = time.time()
     num_layers = len(model.model.layers)
     activations = collect_activation_statistics(model, (input_ids, attention_mask), num_layers)
+    print(f"Activation statistics collection time: {time.time() - start_collect:.4f} s")
     
     print("Identifying salient channels...")
+    start_salient = time.time()
     salient_channels = find_salient_channels(activations, protect_ratio)
-    
+    print(f"Salient channels identification time: {time.time() - start_salient:.4f} s")
+
     print("Computing scaling factors...")
+    start_scale = time.time()
     scales = compute_scaling_factors(activations, salient_channels)
-    
+    print(f"Scaling factors computation time: {time.time() - start_scale:.4f} s")
+
     print("Applying AWQ quantization...")
     quantized_model = apply_awq_quantization(model, salient_channels, scales, quant_bits)
     
