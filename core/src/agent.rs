@@ -7,20 +7,11 @@ use anyhow::Result as AnyhowResult;
 use std::sync::Arc;
 use tokio::task::JoinHandle;
 
+#[derive(Clone)]
 pub struct Agent {
     inference: Arc<LlmInference>,
 }
 
-#[derive(Debug)]
-pub enum AgentError {}
-
-impl std::fmt::Display for AgentError {
-    fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        Ok(())
-    }
-}
-
-impl std::error::Error for AgentError {}
 
 impl Agent {
     pub async fn new(model: std::path::PathBuf) -> AnyhowResult<Self> {
@@ -28,11 +19,11 @@ impl Agent {
         Ok(Agent { inference })
     }
 
-    async fn infer_async(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
+    async fn infer_async(&self, prompt: &str, tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<String> {
         // Wrap sync inference in blocking task for async
         let inference = self.inference.clone();
         let prompt = prompt.to_string();
-        let res = tokio::task::spawn_blocking(move || inference.infer(&prompt, tokens))
+        let res = tokio::task::spawn_blocking(move || inference.infer(&prompt, tokens, temperature, top_k, top_p))
             .await
             .map_err(|e| anyhow::anyhow!("blocking task failed: {}", e))?;
         res
@@ -46,7 +37,7 @@ impl Agent {
             prompt
         );
 
-        let response = self.infer_async(&enhanced_prompt, tokens).await?;
+        let response = self.infer_async(&enhanced_prompt, tokens, 0.7, 50, 0.9).await?;
 
         // Robust extraction of code block using lazy-compiled regexes
         static RUST_CODE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r#"(?s)```rust\s*(.*?)```"#).unwrap());
@@ -72,17 +63,16 @@ impl Agent {
     pub async fn generate_codes_parallel(&self, prompts: Vec<&str>, tokens: usize) -> AnyhowResult<Vec<String>> {
         let mut tasks = Vec::new();
         for prompt in prompts {
-            let agent_clone = self.inference.clone();  // Note: Clone if possible, or Arc<Mutex> for shared
-            let task: JoinHandle<AnyhowResult<String>> = tokio::spawn(async move {
-                // For shared inference, use Arc; but for now assume cloneable or single use
-                // TODO: Use Arc<LlmInference> for concurrent inference if supported
-                Err(anyhow::anyhow!("Parallel not fully implemented"))  // Placeholder
-            });
-            tasks.push(task);
+            let agent = self.clone();
+            let prompt = prompt.to_string();
+            tasks.push(tokio::spawn(async move {
+                agent.generate_code(&prompt, tokens).await
+            }));
         }
 
         let mut results = Vec::new();
         for task in tasks {
+            // The first `?` propagates JoinError, the second propagates the AnyhowResult from generate_code.
             results.push(task.await??);
         }
         Ok(results)
