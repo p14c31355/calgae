@@ -12,7 +12,7 @@ use serde::Deserialize;
 use std::fs;
 
 use rand::prelude::*;
-use rand::distributions::WeightedIndex;
+use rand::rngs::ThreadRng;
 use candle_nn::ops::softmax;
 use candle_core::D;
 
@@ -61,8 +61,8 @@ impl LlmInference {
             num_hidden_layers: usize,
             num_attention_heads: usize,
             num_key_value_heads: Option<usize>,
-            rms_norm_eps: f64,
-            rope_theta: f64,
+            rms_norm_eps: f32,
+            rope_theta: f32,
             max_position_embeddings: usize,
             bos_token_id: Option<u32>,
             eos_token_id: Option<u32>,
@@ -83,7 +83,7 @@ impl LlmInference {
             num_attention_heads: hf_config.num_attention_heads,
             num_key_value_heads: num_kv_heads,
             use_flash_attn: false,
-            rms_norm_eps: hf_config.rms_norm_eps,
+            rms_norm_eps: hf_config.rms_norm_eps as f64,
             rope_theta: hf_config.rope_theta,
             bos_token_id: None,
             eos_token_id: None,
@@ -131,7 +131,7 @@ impl LlmInference {
     /// Performs inference on the prompt, generating up to `max_tokens`.
     /// Uses configurable sampling on CPU.
     pub fn infer(&self, prompt: &str, max_tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> Result<String> {
-        let mut rng = thread_rng();
+        let mut rng = rand::rng();
         let mut tokens: Vec<i64> = self
             .tokenizer
             .encode(prompt, true)
@@ -193,7 +193,6 @@ impl LlmInference {
             Ok(output)
         }
     }
-}
 
     fn sample_from_logits(
         &self,
@@ -208,7 +207,8 @@ impl LlmInference {
             return Ok(next);
         }
 
-        let scaled = logits / temperature;
+        let temp_tensor = Tensor::new(&[temperature], logits.device())?;
+        let scaled = (logits / &temp_tensor)?;
         let probs = softmax(&scaled, D::Minus1)?;
         let probs_v: Vec<f32> = probs.to_vec1::<f32>()?;
 
@@ -260,9 +260,23 @@ impl LlmInference {
             probs_copy = new_probs;
         }
 
-        let dist = WeightedIndex::new(&probs_copy).map_err(|e| anyhow::anyhow!("Invalid probabilities: {}", e))?;
-        let next = dist.sample(rng) as u32;
-        Ok(next)
+        // Manual weighted sampling to avoid dependency issues
+        let mut cumsum = 0.0f32;
+        let mut cumprobs = vec![0.0f32; probs_copy.len()];
+        for (i, &p) in probs_copy.iter().enumerate() {
+            cumsum += p;
+            cumprobs[i] = cumsum;
+        }
+        if cumsum == 0.0 {
+            return Err(anyhow::anyhow!("Invalid probabilities: sum to zero"));
+        }
+        let r = rng.random_range(0.0f32..cumsum);
+        for (i, &cum) in cumprobs.iter().enumerate() {
+            if r < cum {
+                return Ok(i as u32);
+            }
+        }
+        Ok((probs_copy.len() - 1) as u32) // Fallback
     }
 }
 
