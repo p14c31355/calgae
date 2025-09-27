@@ -1,0 +1,16 @@
+def add(a: float32, b: float32) -> float32:
+    return a + b
+
+def matrix_mult(A: List[List[float32]], B: List[List[float32]]) -> List[List[float32]]:
+    n = len(A)
+    p = len(B[0])
+    q = len(B)
+    C = [[0 for _ in range(p)] for _ in range(n)]
+    for i in range(n):
+        for j in range(p):
+            for k in range(q):
+                C[i][j] += A[i][k] * B[k][j]
+    return C
+
+# FFI export for Rust call (Codon can generate C code)
+# Note: Compile with codon --embed-rt kernel.codon -o kernel.so for shared lib
