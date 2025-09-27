@@ -76,6 +76,10 @@ impl LlmInference {
             rope_theta: hf_config.rope_theta,
             max_position_embeddings: hf_config.max_position_embeddings,
             tie_word_embeddings: hf_config.tie_word_embeddings,
+            use_flash_attn: todo!(),
+            bos_token_id: todo!(),
+            eos_token_id: todo!(),
+            rope_scaling: todo!(),
         };
 
         let weights: Vec<PathBuf> = fs::read_dir(&model_path)?

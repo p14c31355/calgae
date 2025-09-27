@@ -1,6 +1,7 @@
 # Ignore model binaries (too large for git)
 !models/.gitkeep
-
+*.gguf
+*.safetensors
 # Build artifacts
 target/
 *.o
