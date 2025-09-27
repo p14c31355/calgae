@@ -75,7 +75,7 @@ impl LlmInference {
             rms_norm_eps: hf_config.rms_norm_eps as f64,
             rope_theta: hf_config.rope_theta,
             max_position_embeddings: hf_config.max_position_embeddings,
-            tie_word_embeddings: !hf_config.tie_word_embeddings,
+            tie_word_embeddings: hf_config.tie_word_embeddings,
         };
 
         let weights: Vec<PathBuf> = fs::read_dir(&model_path)?
