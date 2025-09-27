@@ -100,7 +100,7 @@ impl LlmInference {
 
         for _ in 0..max_tokens {
             let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
-            let logits = self.model.lock().unwrap().forward(&input)?;
+            let logits = self.model.lock().expect("Inference mutex poisoned").forward(&input)?;
             let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
 
             let next_token = logits_processor.sample(&logits)?;
