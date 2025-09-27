@@ -23,8 +23,11 @@ enum Commands {
     /// Build all components (Zig runtime, Lean proofs, etc.)
     BuildAll,
 
-    /// Fetch models from HuggingFace
+    /// Fetch safetensors model from HuggingFace
     FetchModel,
+
+    /// Fetch quantized GGUF model for llm inference
+    FetchGGUF,
 
     /// Run AWQ quantization on TinyLlama using llm-compressor
     AwqQuantize,
@@ -278,41 +281,41 @@ async fn main() -> Result<()> {
         Commands::AwqQuantize => {
             println!("Running AWQ quantization...");
 
-            let compressor_dir = "llm-compressor";
-            let compressor_path = Path::new(compressor_dir);
-            if !compressor_path.exists() {
-                let clone = AsyncCommand::new("git")
-                    .args([
-                        "clone",
-                        "https://github.com/vllm-project/llm-compressor.git",
-                    ])
-                    .status()
-                    .await?;
-                if !clone.success() {
-                    anyhow::bail!("Clone failed.");
-                }
-            }
-
-            let setup = AsyncCommand::new("bash")
-                .current_dir(compressor_path)
-                .args(["-c", "{ [ -d venv ] || python3 -m venv venv; } && source venv/bin/activate && pip install -e ."])
+            // Install autoawq if not present
+            let install = AsyncCommand::new("pip3")
+                .args(["install", "autoawq", "accelerate", "transformers"])
                 .status()
                 .await?;
-            if !setup.success() {
-                eprintln!("Warning: Setup failed.");
+            if !install.success() {
+                eprintln!("Warning: Failed to install autoawq dependencies. Install manually: pip3 install autoawq accelerate transformers");
             }
 
-            let awq = AsyncCommand::new("bash")
-                .current_dir(compressor_path)
-                .args(["-c", "source venv/bin/activate && python -m llmcompressor.awq --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --q_bits 4 --q_group_size 128 --dump_awq tinyllama_awq.pt"])
+            let awq = AsyncCommand::new("python3")
+                .args(["llm-compressor/awq.py"])
+                .current_dir(".")
                 .status()
                 .await?;
             if awq.success() {
-                println!("AWQ completed. Output in {}.", compressor_dir);
+                println!("AWQ quantization completed. Quantized model saved to ./models/tinyllama-awq");
+                // Copy to models dir if needed
+                let copy = AsyncCommand::new("cp")
+                    .args(["-r", "./models/tinyllama-awq", "./models/"])
+                    .status()
+                    .await?;
+                if copy.success() {
+                    println!("Copied quantized model to models/");
+                }
             } else {
-                anyhow::bail!("AWQ failed.");
+                anyhow::bail!("AWQ quantization failed. Check python3 and dependencies.");
             }
 
+            Ok(())
+        }
+
+        Commands::FetchGGUF => {
+            println!("Fetching GGUF model...");
+            // TODO: Implement GGUF fetch similar to FetchModel
+            println!("Placeholder: Fetch GGUF from HuggingFace.");
             Ok(())
         }
     }
