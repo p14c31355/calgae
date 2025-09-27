@@ -1,0 +1,22 @@
+Thread   Start(us)  B/E     Dur(us)  Name/Detail
+------  ----------  ---  ----------  ------------------------------
+251337     2404555  BEG        7656  LowerSemanticCF
+251337     2412211  END        7656  LowerSemanticCF
+251337     2412217  BEG       78951  CheckLifetimes
+251337     2418361  BEG          40  (A) SymbolTableAnalysis
+251337     2418402  END          40  (A) SymbolTableAnalysis
+251337     2491169  END       78951  CheckLifetimes
+251337     2491175  BEG        7986  AnnotateKernels
+251337     2499162  END        7986  AnnotateKernels
+251337     2499170  BEG        2369  VerifyKernels
+251337     2501539  END        2369  VerifyKernels
+251337     4282607  BEG        6827  LowerSemanticCF
+251337     4289434  END        6827  LowerSemanticCF
+251337     4289442  BEG       59432  CheckLifetimes
+251337     4292273  BEG          15  (A) SymbolTableAnalysis
+251337     4292288  END          15  (A) SymbolTableAnalysis
+251337     4348875  END       59432  CheckLifetimes
+251337     4348881  BEG        4450  AnnotateKernels
+251337     4353331  END        4450  AnnotateKernels
+251337     4353336  BEG        1361  VerifyKernels
+251337     4354698  END        1361  VerifyKernels
