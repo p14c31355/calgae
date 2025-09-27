@@ -63,3 +63,6 @@ tools/
 .env
 coverage/
 test-results/
+
+# Specific virtual env
+llm-compressor/venv/
