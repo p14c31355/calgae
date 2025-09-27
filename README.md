@@ -141,9 +141,3 @@ cd calgae
 ```
 
 This will run the basic LLM inference and code generation in Calgae!
-
-### Next Steps
-- Multi-language code generation from LLM prompts.
-- FFI integration for Rust-Zig-Lean-Mojo-Codon.
-- Full formal verification pipeline.
-- Optimization with Mojo/Codon kernels.
