@@ -218,6 +218,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "clap",
+ "futures",
  "half",
  "hf-hub",
  "once_cell",

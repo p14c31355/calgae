@@ -61,21 +61,14 @@ impl Agent {
 
     /// Run multiple generation tasks in parallel
     pub async fn generate_codes_parallel(&self, prompts: Vec<&str>, tokens: usize) -> AnyhowResult<Vec<String>> {
-        let mut tasks = Vec::new();
-        for prompt in prompts {
+        let tasks = prompts.into_iter().map(|prompt| {
             let agent = self.clone();
             let prompt = prompt.to_string();
-            tasks.push(tokio::spawn(async move {
-                agent.generate_code(&prompt, tokens).await
-            }));
-        }
+            tokio::spawn(async move { agent.generate_code(&prompt, tokens).await })
+        });
 
-        let mut results = Vec::new();
-        for task in tasks {
-            // The first `?` propagates JoinError, the second propagates the AnyhowResult from generate_code.
-            results.push(task.await??);
-        }
-        Ok(results)
+        let results = futures::future::try_join_all(tasks).await?;
+        results.into_iter().collect()
     }
 }
 
