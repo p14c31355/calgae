@@ -1,5 +1,10 @@
 {"version": 7,
  "packagesDir": ".lake/packages",
- "packages": [],
+ "packages": [
+   {
+     "name": "mathlib",
+     "src": "https://github.com/leanprover-community/mathlib4"
+   }
+ ],
  "name": "CalgaeProof",
  "lakeDir": ".lake"}
