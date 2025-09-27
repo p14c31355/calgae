@@ -36,7 +36,7 @@ impl Agent {
     }
 
     /// Generate code for a single prompt asynchronously
-    pub async fn generate_code(&self, prompt: &str, tokens: usize) -> AnyhowResult<String> {
+    pub async fn generate_code(&self, prompt: &str, tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<String> {
         // Enhance prompt for code generation
         let enhanced_prompt = format!(
             "You are a helpful coding assistant. Generate Rust code for: {}",
@@ -44,7 +44,7 @@ impl Agent {
         );
 
         let response = self
-            .infer_async(&enhanced_prompt, tokens, 0.7, 50, 0.95)
+            .infer_async(&enhanced_prompt, tokens, temperature, top_k, top_p)
             .await?;
 
         // Robust extraction of code block using lazy-compiled regexes
@@ -76,11 +76,14 @@ impl Agent {
         &self,
         prompts: Vec<&str>,
         tokens: usize,
+        temperature: f32,
+        top_k: usize,
+        top_p: f32,
     ) -> AnyhowResult<Vec<String>> {
         let tasks = prompts.into_iter().map(|prompt| {
             let agent = self.clone();
             let prompt = prompt.to_string();
-            tokio::spawn(async move { agent.generate_code(&prompt, tokens).await })
+            tokio::spawn(async move { agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await })
         });
 
         let results = futures::future::try_join_all(tasks).await?;
@@ -92,9 +95,12 @@ pub async fn run_agent(
     agent_path: std::path::PathBuf,
     prompt: String,
     tokens: usize,
+    temperature: f32,
+    top_k: usize,
+    top_p: f32,
 ) -> AnyhowResult<()> {
     let agent = Agent::new(agent_path).await?;
-    let result = agent.generate_code(&prompt, tokens).await?;
+    let result = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
     println!("{}", result);
     Ok(())
 }

@@ -52,7 +52,8 @@ engine/*.log
 *.swp
 *.swo
 *~
-.vscode/
+.vscode/*
+!.vscode/settings.json
 .idea/
 
 # Misc
