@@ -295,7 +295,7 @@ async fn main() -> Result<()> {
 
             let setup = AsyncCommand::new("bash")
                 .current_dir(compressor_path)
-                .args(["-c", "[ -d venv ] || python3 -m venv venv && source venv/bin/activate && pip install -e ."])
+                .args(["-c", "{ [ -d venv ] || python3 -m venv venv; } && source venv/bin/activate && pip install -e ."])
                 .status()
                 .await?;
             if !setup.success() {
