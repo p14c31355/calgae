@@ -311,5 +311,12 @@ async fn main() -> Result<()> {
 
             Ok(())
         }
+
+        Commands::FetchGGUF => {
+            println!("Fetching GGUF model...");
+            // TODO: Implement GGUF fetch similar to FetchModel
+            println!("Placeholder: Fetch GGUF from HuggingFace.");
+            Ok(())
+        }
     }
 }
