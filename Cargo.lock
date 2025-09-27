@@ -314,7 +314,7 @@ dependencies = [
  "anstream",
  "anstyle",
  "clap_lex",
- "strsim 0.11.1",
+ "strsim",
 ]
 
 [[package]]
@@ -326,7 +326,7 @@ dependencies = [
  "heck",
  "proc-macro2",
  "quote",
- "syn 2.0.106",
+ "syn",
 ]
 
 [[package]]
@@ -4009,6 +4009,7 @@ dependencies = [
  "paste",
  "raw-cpuid 11.6.0",
  "seq-macro",
+ "sysctl",
 ]
 
 [[package]]
@@ -4081,7 +4082,6 @@ dependencies = [
  "bytemuck",
  "dyn-stack 0.10.0",
  "half",
- "num-complex",
  "num-traits",
  "paste",
  "pulp 0.18.22",

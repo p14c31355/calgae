@@ -54,16 +54,16 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 
 # Candle for lightweight inference on safetensors weights
-candle-core = { version = "0.6.0", default-features = false, features = ["cpu", "safetensors"] }
-candle-nn = "0.6.0"
-candle-transformers = "0.6.0"
-hf-hub = "0.3.17"
+candle-core = "0.7.0"
+candle-nn = "0.7.0"
+candle-transformers = "0.7.0"
+hf-hub = "0.4.3"
 tokenizers = "0.19.1"
 
 num_cpus = "1.16"
-half = { version = "2.4.0", default-features = false }
+half = "2.3.1"
 
-rand_distr = { version = "0.5.1", default-features = false }
+rand_distr = "0.4.3"
 
 thiserror = "2.0.16"
 
@@ -74,7 +74,7 @@ serde_json = "1.0.145"
 
 serde = { version = "1.0", features = ["derive"] }
 
-rand = "0.9.2"
+rand = "0.8.5"
 futures = "0.3"
 tempfile = "3.10"
 
@@ -84,3 +84,7 @@ hf-hub = "0.4.3"
 [[bin]]
 name = "xtask"
 path = "src/bin/xtask.rs"
+
+[[bin]]
+name = "calgae"
+path = "src/main.rs"
