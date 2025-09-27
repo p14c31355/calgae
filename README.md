@@ -20,7 +20,7 @@ Calgae is a high-speed, resource-efficient LLM runtime built with modern safe sy
 
 2. Install dependencies:
    - Rust: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
-   - Zig: `curl https://ziglang.org/download/0.11.0/zig-linux-x86_64-0.11.0.tar.xz | tar xvf -`
+   - Zig: Download from https://ziglang.org/download/ and follow installation instructions to add it to your PATH.
    - Codon: Download from https://codon.com
    - Mojo: Install from https://www.modular.com/mojo
    - Lean4: Follow https://lean-lang.org/lean4/doc/quickstart.html
