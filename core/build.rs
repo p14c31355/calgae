@@ -34,7 +34,7 @@ fn main() {
 
     // Compile Codon to shared library for acceleration
     let codon_status = Command::new("codon")
-        .args(&["compile", "--embed-rt", "--opt-level=3", "ml/codon/kernel.codon", "-o", "libcodon_kernel.so", "-lshared"])
+        .args(&["compile", "--embed-rt", "--opt-level=3", "ml/codon/kernel.codon", "-o", "libcodon_kernel.so", "-shared"])
         .current_dir(".")
         .status();
 
