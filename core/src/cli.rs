@@ -2,7 +2,7 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "calgae-agent",
+    name = "calgae",
     about = "CLI Coding Agent using Candle LLM on CPU"
 )]
 pub struct Args {
@@ -38,7 +38,7 @@ pub struct Args {
     #[arg(
         short = 'i',
         long,
-        default_value_t = false,
+        default_value_t = true,
         help = "Interactive mode for multi-turn coding assistance"
     )]
     pub interactive: bool,

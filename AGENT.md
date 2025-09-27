@@ -246,8 +246,13 @@ Agents should be:
 
 ### 🎯 Long-term
 
+<<<<<<< HEAD
 * [x] Formalize quantization correctness in Lean4.
 * [x] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
+=======
+* [ ] Formalize quantization correctness in Lean4.
+* [ ] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
+>>>>>>> aca3ede (Adjustment docs)
 * [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Codon + Lean4).
 
 ---

@@ -21,6 +21,8 @@ use std::sync::Arc;
 
 use log::info;
 
+use rand::Rng;
+
 use std::fs;
 
 use serde_json::from_str;
@@ -76,6 +78,10 @@ impl LlmInference {
             rope_theta: hf_config.rope_theta,
             max_position_embeddings: hf_config.max_position_embeddings,
             tie_word_embeddings: hf_config.tie_word_embeddings,
+            use_flash_attn: false,
+            bos_token_id: Some(hf_config.bos_token_id as u32),
+            eos_token_id: Some(hf_config.eos_token_id as u32),
+            rope_scaling: hf_config.rope_scaling.map(|s| candle_transformers::models::llama::RopeScaling { factor: s.factor, r#type: s.r#type }),
         };
 
         let weights: Vec<PathBuf> = fs::read_dir(&model_path)?
@@ -110,6 +116,9 @@ impl LlmInference {
         &self,
         prompt: &str,
         max_tokens: usize,
+        temperature: f32,
+        top_k: usize,
+        top_p: f32,
     ) -> Result<String> {
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;

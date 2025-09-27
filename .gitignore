@@ -1,6 +1,6 @@
 # Ignore model binaries (too large for git)
 !models/.gitkeep
-
+# *.safetensors
 # Build artifacts
 target/
 *.o
@@ -48,6 +48,13 @@ tools/
 .env
 coverage/
 test-results/
+
+# Ignore large model files and directories
+models/
+!models/.gitkeep
+llm-compressor/models/
+*.gguf
+*.safetensors
 
 # Specific virtual env
 llm-compressor/venv/
