@@ -111,19 +111,20 @@ impl LlmInference {
 
         let model = Llama::load(vb, &config)?;
 
-        let eos_token_id = tokenizer
-            .token_to_id("<|endoftext|>")
-            .ok_or_else(|| anyhow::anyhow!("Eos token <|endoftext|> not found"))?;
-        let pad_token_id = tokenizer
-            .token_to_id("<pad>")
-            .or_else(|| tokenizer.token_to_id("<|endoftext|>"));
+        let eos_token_id = match hf_config.eos_token_id {
+            Some(id) => id,
+            None => tokenizer
+                .token_to_id("<|endoftext|>")
+                .ok_or_else(|| anyhow::anyhow!("Eos token <|endoftext|> not found"))?
+                as u32,
+        };
 
         Ok(Self {
             model,
             tokenizer,
             device,
             eos_token_id,
-            pad_token_id,
+            pad_token_id: None,
             config,
         })
     }
