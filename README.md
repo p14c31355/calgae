@@ -61,32 +61,23 @@ sudo apt update && sudo apt install cmake build-essential git wget curl python3-
 
 ## Setup
 
-1. Clone the repository and its submodules (if engine is set as submodule, otherwise clone manually):
+1. Clone the repository:
 ```bash
-git clone --recurse-submodules https://github.com/p14c31355/calgae.git
+git clone https://github.com/p14c31355/calgae.git
 cd calgae
 ```
-(Note: If you've already cloned without --recurse-submodules, run `git submodule update --init --recursive` inside the repo.)
 
-2. Build the engine:
+2. Setup dependencies and fetch model using xtask:
 ```bash
-cd engine
-mkdir -p build && cd build
-cmake .. -DLLAMA_CURL=OFF
-cmake --build . --config Release
-cd ../..
-```
-
-3. Download the model:
-```bash
-mkdir -p models && wget https://huggingface.co/TheBloke/TinyLlama-1.1B-Chat-v1.0-GGUF/resolve/main/tinyllama-1.1b-chat-v1.0.Q4_0.gguf -O models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf
+cargo run --bin xtask -- setup
+cargo run --bin xtask -- fetch-model  # Downloads safetensors model to models/tinyllama
 ```
 
 ## Usage
 
 ### Rust Agent
 ```bash
-cd core && cargo run -- --llama-bin ../engine/build/bin/llama-cli --model ../models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf --prompt "Generate a Rust function to compute fibonacci sequence"
+cargo run --model models/tinyllama --prompt "Generate a Rust function to compute fibonacci sequence"
 ```
 
 ### Zig Runtime
@@ -113,7 +104,7 @@ cd ml/codon && python optimize.py
 
 ## Inference with TinyLlama
 ```bash
-cd engine/build/bin && ./llama-cli -m ../../models/tinyllama-1.1b-chat-v1.0.Q4_0.gguf --prompt "Hello, my name is" -n 50 --log-disable
+cargo run --model models/tinyllama --prompt "Hello, my name is" --tokens 50
 ```
 
 ## AWQ Quantization
@@ -135,9 +126,9 @@ After cloning, the following commands complete the setup and execution (model do
 ```bash
 git clone https://github.com/p14c31355/calgae.git
 cd calgae
-./scripts/setup_all.sh
-./scripts/fetch_model.sh  # Fetch model (first time only)
-./scripts/run_cpu_llm.sh  # Run LLM (default prompt for Rust code generation)
+cargo run --bin xtask -- setup
+cargo run --bin xtask -- fetch-model  # Fetch model (first time only)
+cargo run --model models/tinyllama --prompt "Generate a Rust function to compute fibonacci sequence"  # Run LLM (default prompt for Rust code generation)
 ```
 
 This will run the basic LLM inference and code generation in Calgae!
