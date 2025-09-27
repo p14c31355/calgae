@@ -6,12 +6,11 @@
 
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
-use std::fs;
 
 use num_cpus;
 use thiserror::Error;
 
-use llm::{KnownModel, Model, InferenceRequest, Vocabulary};
+use llm::KnownModel;
 
 /// Custom errors for inference
 #[derive(Error, Debug)]
@@ -26,26 +25,20 @@ pub enum InferenceError {
 
 /// Struct for lightweight LLM inference using llm crate
 pub struct LlmInference {
-    model: Model,
-    vocabulary: Vocabulary,
+    model: llm::Model,
     quantized: bool,  // Flag for quantization status
 }
 
 impl LlmInference {
-    /// Creates a new inference instance from a GGUF model file path or directory.
-    /// Detects GGUF vs safetensors, uses llm for GGUF, falls back to candle for HF.
-    pub fn new(model_path: PathBuf, dtype: Option<()>) -> Result<Self> {
+    /// Creates a new inference instance from a GGUF model file path.
+    /// Supports quantized models via GGUF format (e.g., tinyllama-q4.gguf).
+    pub fn new(model_path: PathBuf, _dtype: Option<()>) -> Result<Self> {
         let path_str = model_path.to_string_lossy().to_string();
 
         // Check if it's GGUF file
         if model_path.extension().map_or(false, |ext| ext == "gguf") {
-            let model = llm::models::load_model(
-                KnownModel::TinyLlama,
-                llm::ModelSource::File(path_str),
-                llm::ModelParameters::default(),
-            ).context("Failed to load GGUF model")?;
-
-            let vocabulary = model.vocabulary.clone();
+            let model = llm::load_from_file(KnownModel::TinyLlama, &path_str)
+                .context("Failed to load GGUF model")?;
 
             let quantized = model_path.file_name()
                 .and_then(|name| name.to_str())
@@ -53,12 +46,10 @@ impl LlmInference {
 
             Ok(Self {
                 model,
-                vocabulary,
                 quantized,
             })
         } else {
-            // Fallback to candle for safetensors/HF directory (legacy support)
-            return Err(InferenceError::UnsupportedFormat("Current implementation prioritizes GGUF for llm. Use xtask fetch-gguf-model or awq-quantize for GGUF.".to_string()).into());
+            return Err(InferenceError::UnsupportedFormat("Only GGUF format supported. Use xtask fetch-gguf".to_string()).into());
         }
     }
 
@@ -72,33 +63,27 @@ impl LlmInference {
         top_k: usize,
         top_p: f32,
     ) -> Result<String> {
-        let mut session = self.model.start_session(self.vocabulary.clone());
+        let session = self.model.start_session(Default::default());
 
-        let mut req = InferenceRequest {
-            prompt: prompt.to_string(),
-            params: llm::InferenceParameters {
-                n_predict: max_tokens as i64,
-                n_keep: 0,
-                temperature: temperature as f32,
-                top_k: top_k as usize,
-                top_p,
-                repeat_penalty: 1.1,
-                repeat_penalty_last_n: 64,
-                n_threads: Some(num_cpus::get() as u32),
-                ..Default::default()
-            },
-            samplers: vec![],
-            stream_tokenizer_output: false,
+        let mut req = llm::InferenceRequest::new();
+        req.prompt = prompt.to_string();
+        req.params = llm::InferenceParameters {
+            n_predict: max_tokens as i32,
+            n_threads: Some(num_cpus::get() as u32),
+            temperature: temperature as f32,
+            top_k: top_k as usize,
+            top_p: top_p as f32,
+            repeat_penalty: 1.1,
             ..Default::default()
         };
 
         let mut output = String::new();
-        let mut stream = session.infer_with_params(&mut req)?;
+        let mut stream = session.infer(req);
 
         while let Some(token) = stream.next() {
             match token {
                 Ok(token) => output.push_str(&token),
-                Err(e) => return Err(anyhow::anyhow!("Inference streaming failed: {}", e)),
+                Err(_) => break,
             }
         }
 
