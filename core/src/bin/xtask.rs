@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::env;
 use std::fs;
 use std::path::Path;
 use tokio::join;
@@ -32,10 +31,7 @@ enum Commands {
 }
 
 async fn is_command_available(cmd: &str) -> Result<bool> {
-    let output = AsyncCommand::new("which")
-        .arg(cmd)
-        .output()
-        .await?;
+    let output = AsyncCommand::new("which").arg(cmd).output().await?;
     Ok(output.status.success())
 }
 
@@ -94,18 +90,28 @@ async fn main() -> Result<()> {
             }
 
             Ok(())
-        },
+        }
 
         Commands::Setup => {
             println!("Setting up Calgae dependencies...");
 
             // Check base system dependencies
-            let base_deps = ["build-essential", "cmake", "git", "curl", "wget", "python3", "python3-pip"];
+            let base_deps = [
+                "build-essential",
+                "cmake",
+                "git",
+                "curl",
+                "wget",
+                "python3",
+                "python3-pip",
+            ];
             for &dep in &base_deps {
                 if dep == "build-essential" {
                     // Check if gcc is available as proxy for build-essential
                     if !is_command_available("gcc").await? {
-                        eprintln!("Warning: GCC (build-essential) not found. Please install: sudo apt install build-essential");
+                        eprintln!(
+                            "Warning: GCC (build-essential) not found. Please install: sudo apt install build-essential"
+                        );
                     }
                 } else {
                     let cmd = match dep {
@@ -118,7 +124,10 @@ async fn main() -> Result<()> {
                         _ => continue,
                     };
                     if !is_command_available(cmd).await? {
-                        eprintln!("Warning: {} not found. Please install: sudo apt install {}", cmd, dep);
+                        eprintln!(
+                            "Warning: {} not found. Please install: sudo apt install {}",
+                            cmd, dep
+                        );
                     }
                 }
             }
@@ -126,7 +135,9 @@ async fn main() -> Result<()> {
             // Rust setup
             println!("Checking Rust...");
             if !is_command_available("cargo").await? {
-                println!("Rust not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y");
+                println!(
+                    "Rust not found. Install via: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y"
+                );
                 println!("Then add to PATH: source $HOME/.cargo/env");
             } else {
                 println!("Rust is available.");
@@ -136,7 +147,10 @@ async fn main() -> Result<()> {
             println!("Checking Zig...");
             if !is_command_available("zig").await? {
                 let zig_version = "0.13.0";
-                let zig_url = format!("https://ziglang.org/download/{}/zig-linux-x86_64-{}.tar.xz", zig_version, zig_version);
+                let zig_url = format!(
+                    "https://ziglang.org/download/{}/zig-linux-x86_64-{}.tar.xz",
+                    zig_version, zig_version
+                );
                 println!("Zig not found. Download and install manually:");
                 println!("  wget {}", zig_url);
                 println!("  tar -xvf zig-linux-x86_64-{}.tar.xz", zig_version);
@@ -150,7 +164,9 @@ async fn main() -> Result<()> {
             println!("Checking Lean4...");
             if !is_command_available("lake").await? {
                 println!("Lean4 not found. Install via Elan:");
-                println!("  curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh");
+                println!(
+                    "  curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh"
+                );
                 println!("Then add to PATH: source ~/.elan/env");
             } else {
                 println!("Lean4 is available.");
@@ -178,25 +194,9 @@ async fn main() -> Result<()> {
                 eprintln!("Warning: Codon installation failed. Run 'pip3 install codon' manually.");
             }
 
-            // Engine setup
-            println!("Setting up llama.cpp engine...");
-            let submodule = AsyncCommand::new("git")
-                .args(["submodule", "update", "--init", "--recursive"])
-                .status()
-                .await?;
-            if submodule.success() {
-                let engine_build = AsyncCommand::new("bash")
-                    .args(["-c", "cd engine && make clean && make -j$(nproc)"])
-                    .status()
-                    .await?;
-                if !engine_build.success() {
-                    eprintln!("Warning: engine build failed.");
-                }
-            }
-
             println!("Setup complete! Source env files as needed.");
             Ok(())
-        },
+        }
 
         Commands::BuildAll => {
             println!("Building all Calgae components...");
@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
 
             println!("Build complete! Rust and engine via cargo.");
             Ok(())
-        },
+        }
 
         Commands::FetchModel => {
             println!("Fetching TinyLlama model in safetensors format...");
@@ -228,9 +228,18 @@ async fn main() -> Result<()> {
             fs::create_dir_all(model_dir)?;
 
             let files = vec![
-                ("config.json", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/config.json"),
-                ("tokenizer.json", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json"),
-                ("model.safetensors", "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors"),
+                (
+                    "config.json",
+                    "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/config.json",
+                ),
+                (
+                    "tokenizer.json",
+                    "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/tokenizer.json",
+                ),
+                (
+                    "model.safetensors",
+                    "https://huggingface.co/microsoft/TinyLlama-1.1B-Chat-v1.0/resolve/main/model.safetensors",
+                ),
             ];
 
             let mut all_success = true;
@@ -256,20 +265,27 @@ async fn main() -> Result<()> {
             }
 
             if all_success {
-                println!("TinyLlama model downloaded successfully to {}.", model_dir.display());
+                println!(
+                    "TinyLlama model downloaded successfully to {}.",
+                    model_dir.display()
+                );
                 Ok(())
             } else {
                 anyhow::bail!("One or more files failed to download.");
             }
-        },
+        }
 
         Commands::AwqQuantize => {
             println!("Running AWQ quantization...");
 
             let compressor_dir = "llm-compressor";
-            if !Path::new(compressor_dir).exists() {
+            let compressor_path = Path::new(compressor_dir);
+            if !compressor_path.exists() {
                 let clone = AsyncCommand::new("git")
-                    .args(["clone", "https://github.com/vllm-project/llm-compressor.git"])
+                    .args([
+                        "clone",
+                        "https://github.com/vllm-project/llm-compressor.git",
+                    ])
                     .status()
                     .await?;
                 if !clone.success() {
@@ -278,8 +294,8 @@ async fn main() -> Result<()> {
             }
 
             let setup = AsyncCommand::new("bash")
-                .arg("-c")
-                .arg(format!("cd {} && [ -d venv ] || python3 -m venv venv && source venv/bin/activate && pip install -e .", compressor_dir))
+                .current_dir(compressor_path)
+                .args(["-c", "[ -d venv ] || python3 -m venv venv && source venv/bin/activate && pip install -e ."])
                 .status()
                 .await?;
             if !setup.success() {
@@ -287,8 +303,8 @@ async fn main() -> Result<()> {
             }
 
             let awq = AsyncCommand::new("bash")
-                .arg("-c")
-                .arg(format!("cd {} && source venv/bin/activate && python -m llmcompressor.awq --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --q_bits 4 --q_group_size 128 --dump_awq tinyllama_awq.pt", compressor_dir))
+                .current_dir(compressor_path)
+                .args(["-c", "source venv/bin/activate && python -m llmcompressor.awq --model TinyLlama/TinyLlama-1.1B-Chat-v1.0 --q_bits 4 --q_group_size 128 --dump_awq tinyllama_awq.pt"])
                 .status()
                 .await?;
             if awq.success() {
@@ -298,6 +314,6 @@ async fn main() -> Result<()> {
             }
 
             Ok(())
-        },
+        }
     }
 }
