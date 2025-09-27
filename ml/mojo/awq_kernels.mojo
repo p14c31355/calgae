@@ -1,7 +1,7 @@
 # Mojo kernel for AWQ per-channel max abs
 # Export as C library for Python interop
 
-@export("C")
+@export("per_channel_max_abs_c")
 fn per_channel_max_abs_c(
     abs_output: UnsafePointer[Float32],
     batch_size: Int,
@@ -24,6 +24,3 @@ fn per_channel_max_abs_c(
         out_max.store(c, c_max)
 
     return 0
-
-fn main():
-    print("Mojo AWQ C library ready")

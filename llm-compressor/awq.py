@@ -52,11 +52,11 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
         def hook(module, input, output):
             if isinstance(output, tuple):
                 output = output[0]
-            # Per-output-channel max abs over seq and batch dims using Numba
-            act_abs = torch.abs(output).float().detach().cpu().numpy()
+            # Per-output-channel max abs over seq and batch dims using torch
+            act_abs = torch.abs(output).float()
             batch_size, seq_len, hidden_size = act_abs.shape
-            channel_max_np = per_channel_max_abs_np(act_abs.flatten(), batch_size, seq_len, hidden_size)
-            channel_max = torch.from_numpy(channel_max_np).to(output.device).float()
+            # Max over batch and seq (dim 0,1), per channel
+            channel_max = torch.max(act_abs.view(batch_size * seq_len, hidden_size), dim=0)[0].cpu()
             if name not in activations:
                 activations[name] = channel_max
             else:
