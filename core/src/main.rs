@@ -17,6 +17,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    run_agent(args.model.clone(), args.prompt.clone(), args.tokens).await?;
+    run_agent(args.model.clone(), args.prompt.clone(), args.tokens, args.temperature, args.top_k, args.top_p).await?;
     Ok(())
 }
