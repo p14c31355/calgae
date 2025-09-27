@@ -33,20 +33,32 @@ fn main() {
     for file in files {
         let path = model_dir.join(file);
         if !path.exists() {
-            let local_path = repo.get(file).expect("Failed to get file");
-            let contents = std::fs::read(&local_path).expect("Failed to read local file");
-            fs::write(&path, &contents).expect("Failed to write model file");
+            match repo.get(file) {
+                Ok(local_path) => {
+                    let contents = std::fs::read(&local_path).expect("Failed to read local file");
+                    fs::write(&path, &contents).expect("Failed to write model file");
+                }
+                Err(e) => {
+                    eprintln!("Failed to download {}: {}", file, e);
+                }
+            }
         }
     }
 
-    // Download weight files (TinyLlama uses pytorch_model.bin or safetensors)
-    let weight_files = vec!["pytorch_model.bin"];
+    // Download weight files (TinyLlama uses sharded safetensors)
+    let weight_files = vec!["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"];
     for file in weight_files {
         let path = model_dir.join(file);
         if !path.exists() {
-            let local_path = repo.get(file).expect("Failed to get weight file");
-            let contents = std::fs::read(&local_path).expect("Failed to read local weight file");
-            fs::write(&path, &contents).expect("Failed to write weight file");
+            match repo.get(file) {
+                Ok(local_path) => {
+                    let contents = std::fs::read(&local_path).expect("Failed to read local weight file");
+                    fs::write(&path, &contents).expect("Failed to write weight file");
+                }
+                Err(e) => {
+                    eprintln!("Failed to download {}: {}", file, e);
+                }
+            }
         }
     }
 
