@@ -3,7 +3,11 @@ use once_cell::sync::Lazy;
 use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
+use std::fs::File;
+use std::io::Write;
+use std::process;
 use std::sync::Arc;
+use tempfile::Builder;
 
 #[derive(Clone)]
 pub struct Agent {
@@ -39,7 +43,7 @@ impl Agent {
     pub async fn generate_code(&self, prompt: &str, tokens: usize, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<String> {
         // Enhance prompt for code generation
         let enhanced_prompt = format!(
-            "You are a helpful coding assistant. Generate Rust code for: {}",
+            "You are a helpful coding assistant. Generate only Rust code for: {}",
             prompt
         );
 
@@ -56,19 +60,15 @@ impl Agent {
         let code = RUST_CODE_BLOCK_RE
             .captures(&response)
             .and_then(|caps| caps.get(1))
-            .or_else(|| {
+            .or_else(||
                 ANY_CODE_BLOCK_RE
                     .captures(&response)
                     .and_then(|caps| caps.get(1))
-            })
+            )
             .map(|m| m.as_str().trim().to_string())
-            .unwrap_or_default();
+            .unwrap_or(response.trim().to_string());
 
-        if code.is_empty() {
-            Ok(response)
-        } else {
-            Ok(format!("Generated code:\n{}", code))
-        }
+        Ok(code)
     }
 
     /// Run multiple generation tasks in parallel
@@ -92,15 +92,59 @@ impl Agent {
 }
 
 pub async fn run_agent(
-    agent_path: std::path::PathBuf,
+    model: std::path::PathBuf,
     prompt: String,
     tokens: usize,
     temperature: f32,
     top_k: usize,
     top_p: f32,
+    execute: bool,
 ) -> AnyhowResult<()> {
-    let agent = Agent::new(agent_path).await?;
-    let result = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
-    println!("{}", result);
+    let agent = Agent::new(model).await?;
+    let code = agent.generate_code(&prompt, tokens, temperature, top_k, top_p).await?;
+
+    if execute {
+        let rs_path = Builder::new()
+            .prefix("calgae_generated")
+            .suffix(".rs")
+            .tempfile()?
+            .path()
+            .to_path_buf();
+
+        let mut f = File::create(&rs_path)
+            .map_err(|e| anyhow::anyhow!("Failed to create temp file: {}", e))?;
+        f.write_all(code.as_bytes())
+            .map_err(|e| anyhow::anyhow!("Failed to write code: {}", e))?;
+
+        let output = process::Command::new("rustc")
+            .arg(&rs_path)
+            .output()
+            .map_err(|e| anyhow::anyhow!("Failed to compile: {}", e))?;
+
+        if !output.status.success() {
+            eprintln!("Compilation failed:\n{}", String::from_utf8_lossy(&output.stderr));
+            return Ok(());
+        }
+
+        let exe_path = rs_path.with_extension("");
+        let run_output = process::Command::new(exe_path)
+            .output()
+            .map_err(|e| anyhow::anyhow!("Failed to run executable: {}", e))?;
+
+        if run_output.status.success() {
+            if !run_output.stdout.is_empty() {
+                println!("Execution output:\n{}", String::from_utf8_lossy(&run_output.stdout));
+            }
+        } else {
+            println!("Execution failed: {}", run_output.status);
+        }
+
+        if !run_output.stderr.is_empty() {
+            eprintln!("Runtime stderr:\n{}", String::from_utf8_lossy(&run_output.stderr));
+        }
+    } else {
+        println!("Generated code:\n{}\n", code);
+    }
+
     Ok(())
 }

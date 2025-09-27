@@ -32,9 +32,17 @@ pub struct Args {
         value_name = "PATH"
     )]
     pub model: std::path::PathBuf,
-    // #[arg(short, long, default_value_t = false, help = "Execute generated code and collect results")]
-    // pub execute: bool,
+    #[arg(short, long, default_value_t = false, help = "Execute generated code and collect results")]
+    pub execute: bool,
+
+    #[arg(
+        short = 'i',
+        long,
+        default_value_t = false,
+        help = "Interactive mode for multi-turn coding assistance"
+    )]
+    pub interactive: bool,
 
     // #[arg(short = 'p', long = "parallel", default_value_t = 1, help = "Number of parallel prompts (for multi-task)")]
-    // pub parallel: usize, // TODO: Implement multi-tasking
+    // pub parallel: usize, // TODO: Implement multi-turning
 }
