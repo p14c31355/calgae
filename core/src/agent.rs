@@ -71,7 +71,7 @@ impl Agent {
 }
 
 pub fn run_agent(args: &Args) -> Result<(), AgentError> {
-    let agent = Agent::new(&args.llama_bin, &args.model);
+    let agent = Agent::new(&args.llama_bin, args.model.clone())?;
     let result = agent.generate_code(args)?;
     println!("{}", result);
     Ok(())

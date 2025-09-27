@@ -10,6 +10,7 @@ fn main() {
         .define("LLAMA_BUILD_TESTS", "OFF")
         .define("LLAMA_BUILD_EXAMPLES", "OFF")
         .define("LLAMA_BUILD_SERVER", "OFF")
+        .define("LLAMA_CURL", "OFF")
         .define("GGML_NATIVE", "ON")
         .define("GGML_BLAS", "OFF")  // Keep minimal, no external BLAS
         .profile("Release")
@@ -29,13 +30,13 @@ fn main() {
 
     // Generate bindings with bindgen
     let bindings = bindgen::Builder::default()
-        .header("../engine/llama.h")
+        .header("../engine/include/llama.h")
         .allowlist_function("llama_.*")
         .allowlist_type("llama_.*")
         .allowlist_var("LLAMA_.*")
         .clang_arg("-I").clang_arg("../engine/")
         .clang_arg("-I").clang_arg(dst.join("include").to_str().unwrap())
-        .parse_callbacks(Box::new(bindgen::CargoCallbacks))
+        .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .expect("Unable to generate bindings");
 
@@ -44,7 +45,54 @@ fn main() {
         .write_to_file(out_path.join("bindings.rs"))
         .expect("Couldn't write bindings!");
 
+
     // Re-run build script if headers change
     println!("cargo:rerun-if-changed=../engine/");
     println!("cargo:rerun-if-changed=../engine/llama.h");
+
+    // Async spawn heavy tasks: AWQ quantization via python script
+    // This runs in background, doesn't block cargo build
+    std::thread::spawn(|| {
+        let status = std::process::Command::new("python")
+            .arg("scripts/awq_tinyllama.py")
+            .status();
+        if let Ok(s) = status {
+            if !s.success() {
+                eprintln!("Warning: AWQ quantization failed in background");
+            }
+        } else {
+            eprintln!("Warning: Failed to run AWQ quantization");
+        }
+    });
+
+    // Async spawn for Codon optimization
+    std::thread::spawn(|| {
+        let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| ".".to_string());
+        let status = std::process::Command::new("codon")
+            .args(["run", "ml/codon/optimize.py", "-o", out_dir.as_str()])
+            .status();
+        if let Ok(s) = status {
+            if !s.success() {
+                eprintln!("Warning: Codon optimization failed in background");
+            }
+        } else {
+            eprintln!("Warning: Failed to run Codon optimization (codon not installed?)");
+        }
+    });
+
+    // Async spawn for Mojo kernel build
+    std::thread::spawn(|| {
+        let out_dir = std::env::var("OUT_DIR").unwrap_or_else(|_| ".".to_string());
+        let status = std::process::Command::new("mojo")
+            .args(["build", "ml/mojo/kernels.mojo", "-o", &format!("{}/kernels", out_dir)])
+            .status();
+        if let Ok(s) = status {
+            if !s.success() {
+                eprintln!("Warning: Mojo build failed in background");
+            }
+        } else {
+            eprintln!("Warning: Failed to run Mojo build (mojo not installed?)");
+        }
+    });
+
 }
