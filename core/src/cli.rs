@@ -9,7 +9,7 @@ pub struct Args {
     #[arg(
         short,
         long,
-        default_value = "Write a simple Rust function to add two numbers"
+        default_value = ""
     )]
     pub prompt: String,
 
@@ -38,7 +38,7 @@ pub struct Args {
     #[arg(
         short = 'i',
         long,
-        default_value_t = true,
+        default_value_t = false,
         help = "Interactive mode for multi-turn coding assistance"
     )]
     pub interactive: bool,

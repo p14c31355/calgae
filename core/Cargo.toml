@@ -3,6 +3,9 @@ name = "calgae"
 version = "0.1.0"
 edition = "2021"
 
+[lib]
+name = "calgae_core"
+
 resolver = "2"
 
 [dependencies]
