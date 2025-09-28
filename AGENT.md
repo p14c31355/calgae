@@ -237,9 +237,13 @@ Agents should be:
 * [x] Quantize small model with AWQ.
 * [x] Run inference in llama.cpp.
 * [x] Benchmark with EdgeProfiler.
+* [x] Quantize small model with AWQ.
+* [x] Run inference in llama.cpp.
+* [x] Benchmark with EdgeProfiler.
 
 ### 🔜 Mid-term
 
+* [x] Build Rust orchestrator.
 * [x] Build Rust orchestrator.
 * [ ] Add Zig kernels for matmul.
 * [ ] Deploy accelerated components in **Mojo/Codon**.
