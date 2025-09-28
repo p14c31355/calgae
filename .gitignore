@@ -1,6 +1,8 @@
 # Ignore model binaries (too large for git)
 !models/.gitkeep
 # *.safetensors
+*events.txt
+*.time-trace
 # Build artifacts
 target/
 *.o
