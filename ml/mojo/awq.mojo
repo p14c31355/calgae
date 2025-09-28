@@ -1,13 +1,10 @@
 # Mojo Implementation of AWQ and SmoothQuant - Syntax Fixed
 from sys.info import *
 from algorithm import parallelize
-from memory.unsafe import malloc, free, memset
-from random import rand
+from memory import Pointer, UnsafePointer
+from collections import List
 
 alias type = Float32
-alias simd_width = simdwidthof[type]()
-
-const eps: Scalar[type] = 1e-8f32
 
 # Per-channel max abs (parallelized)
 @export
@@ -24,11 +21,11 @@ fn per_channel_max_abs_c(
 
     @parameter
     fn compute_channel_max(c: Int):
-        var c_max: Scalar[type] = 0.0
+        var c_max: type = 0.0
         for b in range(batch_size):
             for s in range(seq_len):
                 let idx: Int = b * seq_len * hidden_size + s * hidden_size + c
-                let val: Scalar[type] = abs_output[idx]
+                let val: type = abs_output[idx]
                 c_max = max(c_max, val)
         out_max[c] = c_max
 
@@ -43,19 +40,24 @@ fn top_k_indices_c(
     top_k: Int,
     indices: UnsafePointer[Int32]
 ) -> Int:
-    if top_k > hidden_size:
-        top_k = hidden_size
+    var effective_top_k = top_k
+    if effective_top_k > hidden_size:
+        effective_top_k = hidden_size
 
-    var vals: UnsafePointer[type] = malloc[type](top_k)
-    var idxs: UnsafePointer[Int32] = malloc[Int32](top_k)
-    for i in range(top_k):
+    var vals: Pointer[type] = Pointer[type].alloc(effective_top_k)
+    defer void:
+        vals.free()
+    var idxs: Pointer[Int32] = Pointer[Int32].alloc(effective_top_k)
+    defer void:
+        idxs.free()
+    for i in range(effective_top_k):
         vals[i] = 0.0
-        idxs[i] = 0i32
+        idxs[i] = 0
 
     var count: Int = 0
     for i in range(hidden_size):
         let val = act_max[i]
-        if count < top_k:
+        if count < effective_top_k:
             vals[count] = val
             idxs[count] = i
             count += 1
@@ -63,8 +65,8 @@ fn top_k_indices_c(
         else if val > vals[0]:
             # Replace smallest
             var min_pos: Int = 0
-            var min_val: Scalar[type] = vals[0]
-            for j in range(1, top_k):
+            var min_val: type = vals[0]
+            for j in range(1, effective_top_k):
                 if vals[j] < min_val:
                     min_val = vals[j]
                     min_pos = j
@@ -73,8 +75,8 @@ fn top_k_indices_c(
                 idxs[min_pos] = i
 
     # Sort descending
-    for i in range(top_k):
-        for j in range(i + 1, top_k):
+    for i in range(effective_top_k):
+        for j in range(i + 1, effective_top_k):
             if vals[i] < vals[j]:
                 let tmp_val = vals[i]
                 let tmp_idx = idxs[i]
@@ -83,11 +85,9 @@ fn top_k_indices_c(
                 vals[j] = tmp_val
                 idxs[j] = tmp_idx
 
-    for i in range(top_k):
+    for i in range(effective_top_k):
         indices[i] = idxs[i]
 
-    free[UnsafePointer[type]](vals, top_k * size_of[type]())
-    free[UnsafePointer[Int32]](idxs, top_k * size_of[Int32]())
     return 0
 
 # Compute scale
@@ -99,17 +99,17 @@ fn compute_scale_c(
     num_salient: Int,
     scale_out: UnsafePointer[type]
 ) -> Int:
-    var overall_max: Scalar[type] = 0.0
+    var overall_max: type = 0.0
     for i in range(hidden_size):
         overall_max = max(overall_max, act_max[i])
 
-    var salient_max: Scalar[type] = 0.0
+    var salient_max: type = 0.0
     for i in range(num_salient):
         let idx = Int(salient_indices[i])
         if 0 <= idx < hidden_size:
             salient_max = max(salient_max, act_max[idx])
 
-    let scale = if salient_max > 0.0 { overall_max / (salient_max + eps) } else { 1.0 }
+    let scale = if salient_max > 0.0 { overall_max / (salient_max + 1e-8) } else { 1.0 }
     scale_out[0] = scale
     return 0
 
@@ -118,11 +118,13 @@ fn compute_scale_c(
 fn compute_smoothquant_scales_c(
     act_max: UnsafePointer[type],
     hidden_size: Int,
-    sparsity: Scalar[type],
+    sparsity: type,
     bits: Int,
     scales_out: UnsafePointer[type]
 ) -> Int:
-    var act_list: UnsafePointer[type] = malloc[type](hidden_size)
+    var act_list: Pointer[type] = Pointer[type].alloc(hidden_size)
+    defer void:
+        act_list.free()
     for i in range(hidden_size):
         act_list[i] = act_max[i]
 
@@ -134,9 +136,9 @@ fn compute_smoothquant_scales_c(
                 act_list[i] = act_list[j]
                 act_list[j] = tmp
 
-    let num_outliers = Int(sparsity * Scalar[type](hidden_size))
-    let beta: Scalar[type] = 0.85
-    let qmax: Scalar[type] = if bits == 8 { 127.0 } else { 7.0 }
+    let num_outliers = Int(sparsity * type(hidden_size))
+    let beta: type = 0.85
+    let qmax: type = if bits == 8 { 127.0 } else { 7.0 }
 
     for i in range(hidden_size):
         scales_out[i] = 1.0
@@ -147,7 +149,6 @@ fn compute_smoothquant_scales_c(
         for i in range(num_outliers):
             scales_out[i] = scale_factor
 
-    free[UnsafePointer[type]](act_list, hidden_size * size_of[type]())
     return 0
 
 # Apply AWQ to weight (inout)
@@ -156,7 +157,7 @@ fn apply_awq_quantize(
     weight: UnsafePointer[type],  # inout [out_dim * in_dim]
     out_dim: Int,
     in_dim: Int,
-    scale: Scalar[type],
+    scale: type,
     salient_indices: UnsafePointer[Int32],
     num_salient: Int,
     bits: Int = 4
@@ -170,16 +171,16 @@ fn apply_awq_quantize(
             salient_set.append(ch)
 
     # Apply scale to salient
-    for ch in range(len(salient_set)):
-        let s_ch = salient_set[ch]
+    for ch_idx in range(len(salient_set)):
+        let s_ch = salient_set[ch_idx]
         let offset = s_ch * in_dim
         for j in range(in_dim):
             let idx = offset + j
             weight[idx] = weight[idx] * scale
 
     # Quantize non-salient
-    let qmax = 7.0  # INT4 signed max
-    let qmin = -8.0
+    let qmax: type = 7.0  # INT4 signed max
+    let qmin: type = -8.0
     for ch in range(out_dim):
         let is_salient = False
         for s in range(len(salient_set)):
@@ -188,7 +189,7 @@ fn apply_awq_quantize(
                 break
         if not is_salient:
             let offset = ch * in_dim
-            var ch_max: Scalar[type] = 0.0
+            var ch_max: type = 0.0
             for j in range(in_dim):
                 let idx = offset + j
                 ch_max = max(ch_max, abs(weight[idx]))
@@ -199,7 +200,7 @@ fn apply_awq_quantize(
                 let val = weight[idx]
                 let q_val = round(val / ch_scale)
                 let clamped = max(min(q_val, qmax), qmin)
-                weight[idx] = Scalar[type](clamped) * ch_scale
+                weight[idx] = clamped * ch_scale
 
     return 0
 
@@ -215,18 +216,18 @@ fn apply_smoothquant_quantize(
 ) -> Int:
     # Compensate act scales
     for ch in range(out_dim):
-        let a_scale = max(act_scales[ch], eps)
+        let a_scale = max(act_scales[ch], 1e-8)
         let offset = ch * in_dim
         for j in range(in_dim):
             let idx = offset + j
             weight[idx] = weight[idx] / a_scale
 
     # Group quant
-    let qmax = 127.0
-    let qmin = -128.0
+    let qmax: type = 127.0
+    let qmin: type = -128.0
     for g_start in range(0, out_dim, group_size):
         let g_end = min(g_start + group_size, out_dim)
-        var g_max: Scalar[type] = 0.0
+        var g_max: type = 0.0
         for ch in range(g_start, g_end):
             let offset = ch * in_dim
             for j in range(in_dim):
@@ -241,7 +242,7 @@ fn apply_smoothquant_quantize(
                 let val = weight[idx]
                 let q_val = round(val / g_scale)
                 let clamped = max(min(q_val, qmax), qmin)
-                weight[idx] = Scalar[type](clamped) * g_scale
+                weight[idx] = clamped * g_scale
 
     return 0
 
@@ -255,25 +256,28 @@ fn quantize_layer_awq(
     weight: UnsafePointer[type],
     in_d: Int,
     out_d: Int,
-    top_k_p: Scalar[type]
+    top_k_p: type
 ) -> Int:
     # Local buffers
-    var act_max = malloc[type](h)
-    _ = per_channel_max_abs_c(acts_abs, b, s, h, act_max)
+    var act_max = Pointer[type].alloc(h)
+    defer void:
+        act_max.free()
+    _ = per_channel_max_abs_c(acts_abs, b, s, h, act_max.unsafe_ptr())
 
-    let num_sal = max(1, Int(top_k_p * Scalar[type](h)))
-    var sal_idx = malloc[Int32](num_sal)
-    _ = top_k_indices_c(act_max, h, num_sal, sal_idx)
+    let num_sal = max(1, Int(top_k_p * type(h)))
+    var sal_idx = Pointer[Int32].alloc(num_sal)
+    defer void:
+        sal_idx.free()
+    _ = top_k_indices_c(act_max.unsafe_ptr(), h, num_sal, sal_idx.unsafe_ptr())
 
-    var sc = malloc[type](1)
-    _ = compute_scale_c(act_max, h, sal_idx, num_sal, sc)
+    var sc = Pointer[type].alloc(1)
+    defer void:
+        sc.free()
+    _ = compute_scale_c(act_max.unsafe_ptr(), h, sal_idx.unsafe_ptr(), num_sal, sc.unsafe_ptr())
     let the_scale = sc[0]
 
-    _ = apply_awq_quantize(weight, out_d, in_d, the_scale, sal_idx, num_sal)
+    _ = apply_awq_quantize(weight, out_d, in_d, the_scale, sal_idx.unsafe_ptr(), num_sal)
 
-    free(act_max, h * size_of[type]())
-    free(sal_idx, num_sal * size_of[Int32]())
-    free(sc, size_of[type]())
     return 0
 
 # Similar for SmoothQuant
@@ -286,17 +290,19 @@ fn quantize_layer_smoothquant(
     weight: UnsafePointer[type],
     in_d: Int,
     out_d: Int,
-    spar: Scalar[type],
+    spar: type,
     bt: Int
 ) -> Int:
-    var act_max = malloc[type](h)
-    _ = per_channel_max_abs_c(acts_abs, b, s, h, act_max)
+    var act_max = Pointer[type].alloc(h)
+    defer void:
+        act_max.free()
+    _ = per_channel_max_abs_c(acts_abs, b, s, h, act_max.unsafe_ptr())
 
-    var scales = malloc[type](h)
-    _ = compute_smoothquant_scales_c(act_max, h, spar, bt, scales)
+    var scales = Pointer[type].alloc(h)
+    defer void:
+        scales.free()
+    _ = compute_smoothquant_scales_c(act_max.unsafe_ptr(), h, spar, bt, scales.unsafe_ptr())
 
-    _ = apply_smoothquant_quantize(weight, out_d, in_d, scales, bt)
+    _ = apply_smoothquant_quantize(weight, out_d, in_d, scales.unsafe_ptr(), bt)
 
-    free(act_max, h * size_of[type]())
-    free(scales, h * size_of[type]())
     return 0
