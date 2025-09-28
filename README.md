@@ -1,7 +1,3 @@
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> develop
 # Calgae: Lightweight LLM Runtime and Model Stack
 
 Calgae is a high-speed, resource-efficient LLM runtime built with modern safe systems languages: Rust, Zig, Mojo, Codon, and Lean4. It prioritizes quantization, distillation, and formal verification for safe, portable inference on CPU.
@@ -84,10 +80,3 @@ For publication, consider crates.io for Rust components and GitHub releases for 
 ## License
 
 MIT / Apache-2.0 (see LICENSE files).
-<<<<<<< HEAD
-=======
-=======
-# calgae
-Calc Algae - self made LLM project (experimental)
->>>>>>> aca3ede (Adjustment docs)
->>>>>>> develop

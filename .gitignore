@@ -1,16 +1,9 @@
 # Ignore model binaries (too large for git)
-<<<<<<< HEAD
-models/*
+models/
 !models/.gitkeep
 *events.txt
 *.time-trace
 
-=======
-!models/.gitkeep
-# *.safetensors
-*events.txt
-*.time-trace
->>>>>>> develop
 # Build artifacts
 target/
 *.o
@@ -43,7 +36,6 @@ _build/
 lean_dep/
 lean4-build/
 
-<<<<<<< HEAD
 # Engine (llama.cpp)
 engine/build/
 engine/ggml/
@@ -57,9 +49,6 @@ engine/*.log
 *.bin
 *.safetensors
 
-
-=======
->>>>>>> develop
 # IDE and editor files
 *.swp
 *.swo
@@ -76,15 +65,5 @@ tools/
 coverage/
 test-results/
 
-<<<<<<< HEAD
-=======
-# Ignore large model files and directories
-models/
-!models/.gitkeep
-llm-compressor/models/
-*.gguf
-*.safetensors
-
->>>>>>> develop
 # Specific virtual env
 llm-compressor/venv/
