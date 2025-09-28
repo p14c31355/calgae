@@ -2,14 +2,14 @@ use clap::Parser;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "calgae-agent",
+    name = "calgae",
     about = "CLI Coding Agent using Candle LLM on CPU"
 )]
 pub struct Args {
     #[arg(
         short,
         long,
-        default_value = "Write a simple Rust function to add two numbers"
+        default_value = ""
     )]
     pub prompt: String,
 

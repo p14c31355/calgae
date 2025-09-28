@@ -8,7 +8,11 @@ const ALGAE_ART: &str = "\n                                 ,---.\n             
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("{}", ALGAE_ART);
 
-    let args = Args::parse();
+    let mut args = Args::parse();
+
+    if args.prompt.is_empty() {
+        args.interactive = true;
+    }
 
     if !args.model.exists() {
         eprintln!(
