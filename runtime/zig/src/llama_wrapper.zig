@@ -32,6 +32,13 @@ pub export fn llama_eval(ctx_ptr: ?*c_llama.llama_context, tokens: [*]const c_ll
     return c_llama.llama_eval(ctx_ptr orelse null, tokens, n_tokens, n_past, logits orelse null);
 }
 
+pub export fn mock_tokenize(text: [*:0]const u8, tokens: [*]i32) c_int {
+    const t = std.mem.span(text);
+    std.log.info("Mock tokenize: {s}", .{t});
+    if (t.len > 0) tokens[0] = 1234; // Mock token
+    return 1;
+}
+
 pub export fn llama_token_to_str(ctx_ptr: ?*c_llama.llama_context, token: c_llama.llama_token, buf: [*]u8, length: c_int) c_int {
     return c_llama.llama_token_to_str(ctx_ptr orelse null, token, @ptrCast(buf), length);
 }

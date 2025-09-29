@@ -49,7 +49,7 @@ pub export fn zig_tcp_close(fd: c_int) void {
 // Threading
 pub export fn zig_spawn_thread(fn_ptr: *const fn() callconv(.C) void) c_int {
     const thread = std.Thread.spawn(.{}, struct {
-        fn run(fn: *const fn() callconv(.C) void) void {
+        pub fn run(fn: *const fn() callconv(.C) void) void {
             @call(.auto, fn, .{});
         }
     }.run, .{fn_ptr}) catch return -1;

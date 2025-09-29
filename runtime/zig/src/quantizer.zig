@@ -43,7 +43,7 @@ pub fn run_quantization(self: *QuantWorker, model_path: [*:0]const u8, quant_bit
     self.parallel_quant_loop(floats, &out_file);
 }
 
-fn parallel_quant_loop(self: *QuantWorker, floats: []f32, out_file: *std.fs.File) void {
+fn parallel_quant_loop(floats: []f32, out_file: *std.fs.File) void {
     const chunk_size = floats.len / 4; // 4 workers
     const work_items = 4;
     var threads: [4]std.Thread = undefined;
