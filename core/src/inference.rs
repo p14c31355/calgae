@@ -82,6 +82,8 @@ impl LlmInference {
         if weights.is_empty() {
             return Err(anyhow::anyhow!("No safetensors files found"));
         }
+
+
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)? };
 

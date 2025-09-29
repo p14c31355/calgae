@@ -24,8 +24,8 @@ once_cell = "1.21.3"
 regex = "1.11.3"
 tempfile = "3.23.0"
 futures = "0.3.31"
+libc = "0.2.155"
 
-# Build dependencies
 [build-dependencies]
 cc = "1.0"
 
