@@ -8,7 +8,7 @@ fn main() {
     println!("cargo:rerun-if-changed=runtime/src/runtime.zig");
     println!("cargo:rerun-if-changed=ml/codon/kernel.codon");
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR environment variable not set by Cargo"));
     
     println!("cargo:rustc-link-search=native={}", out_dir.display());
 
