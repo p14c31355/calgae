@@ -42,7 +42,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let mut cmd = std::process::Command::new("./awq_bin");
             cmd.arg(args.quantize_mode.clone());
-            cmd.arg(weight_path.to_str().unwrap());
+            if let Some(path_str) = weight_path.to_str() {
+                cmd.arg(path_str);
+            } else {
+                eprintln!("Warning: skipping non-UTF8 path: {}", weight_path.display());
+                continue;
+            }
             if args.quantize_mode == "awq" {
                 cmd.arg(args.top_k_p.to_string());
             } else if args.quantize_mode == "smoothquant" {
