@@ -9,7 +9,7 @@ fn main() {
         .args(&[
             "build",
             "../ml/mojo/awq.mojo",
-            "-o", mojo_out.to_str().unwrap(),
+            "-o", &mojo_out.to_string_lossy(),
             "--emit", "shared-lib",
             "-O3"
         ])
