@@ -4,15 +4,16 @@ pub fn add(a: i32, b: i32) i32 {
     return a + b;
 }
 
-pub export fn matrix_mult(n: usize, p: usize, q: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
+// matrix_mult multiplies A (m x n) by B (n x p) and stores the result in C (m x p).
+pub export fn matrix_mult(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
     var i: usize = 0;
-    while (i < n) : (i += 1) {
+    while (i < m) : (i += 1) {
         var j: usize = 0;
         while (j < p) : (j += 1) {
             var sum: f32 = 0.0;
             var k: usize = 0;
-            while (k < q) : (k += 1) {
-                sum = @mulAdd(f32, a[i * q + k], b[k * p + j], sum);
+            while (k < n) : (k += 1) {
+                sum = @mulAdd(f32, a[i * n + k], b[k * p + j], sum);
             }
             c[i * p + j] = sum;
         }
@@ -28,7 +29,7 @@ test "matrix_mult" {
     const a = [_]f32{ 1.0, 2.0, 3.0 }; // 1x3
     const b = [_]f32{ 7.0, 8.0, 9.0, 10.0, 11.0, 12.0 }; // 3x2
     var c = [_]f32{ 0.0, 0.0 }; // 1x2
-    matrix_mult(1, 2, 3, &a, &b, &c);
+    matrix_mult(1, 3, 2, &a, &b, &c);
 
     // Expected: [1*7+2*9+3*11, 1*8+2*10+3*12] = [7+18+33, 8+20+36] = [58, 64]
     try std.testing.expectApproxEqAbs(c[0], 58.0, 0.001);

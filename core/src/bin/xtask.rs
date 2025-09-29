@@ -98,40 +98,31 @@ async fn main() -> Result<()> {
         Commands::Setup => {
             println!("Setting up Calgae dependencies...");
 
+            struct Dependency<'a> {
+                package_name: &'a str,
+                command: &'a str,
+                install_hint: &'a str,
+            }
+
             // Check base system dependencies
-            let base_deps = [
-                "build-essential",
-                "cmake",
-                "git",
-                "curl",
-                "wget",
-                "python3",
-                "python3-pip",
+            let base_deps = vec![
+                Dependency { package_name: "build-essential", command: "gcc", install_hint: "sudo apt install build-essential" },
+                Dependency { package_name: "cmake", command: "cmake", install_hint: "sudo apt install cmake" },
+                Dependency { package_name: "git", command: "git", install_hint: "sudo apt install git" },
+                Dependency { package_name: "curl", command: "curl", install_hint: "sudo apt install curl" },
+                Dependency { package_name: "wget", command: "wget", install_hint: "sudo apt install wget" },
+                Dependency { package_name: "python3", command: "python3", install_hint: "sudo apt install python3" },
+                Dependency { package_name: "python3-pip", command: "pip3", install_hint: "sudo apt install python3-pip" },
             ];
-            for &dep in &base_deps {
-                if dep == "build-essential" {
-                    // Check if gcc is available as proxy for build-essential
-                    if !is_command_available("gcc").await? {
-                        eprintln!(
-                            "Warning: GCC (build-essential) not found. Please install: sudo apt install build-essential"
-                        );
-                    }
-                } else {
-                    let cmd = match dep {
-                        "cmake" => "cmake",
-                        "git" => "git",
-                        "curl" => "curl",
-                        "wget" => "wget",
-                        "python3" => "python3",
-                        "python3-pip" => "pip3",
-                        _ => continue,
-                    };
-                    if !is_command_available(cmd).await? {
-                        eprintln!(
-                            "Warning: {} not found. Please install: sudo apt install {}",
-                            cmd, dep
-                        );
-                    }
+
+            for dep in &base_deps {
+                if !is_command_available(dep.command).await? {
+                    eprintln!(
+                        "Warning: Dependency '{}' (command: '{}') not found. Please install: {}",
+                        dep.package_name,
+                        dep.command,
+                        dep.install_hint
+                    );
                 }
             }
 
@@ -205,7 +196,7 @@ async fn main() -> Result<()> {
             println!("Building all Calgae components...");
 
             let zig_build = AsyncCommand::new("bash")
-                .args(["-c", "cd runtime && zig build-exe src/runtime.zig"])
+                .args(["-c", "cd runtime/zig && zig build"])
                 .status()
                 .await?;
             if !zig_build.success() {
@@ -297,14 +288,6 @@ async fn main() -> Result<()> {
                 .await?;
             if awq.success() {
                 println!("AWQ quantization completed. Quantized model saved to ./models/tinyllama-awq");
-                // Copy to models dir if needed
-                let copy = AsyncCommand::new("cp")
-                    .args(["-r", "./models/tinyllama-awq", "./models/"])
-                    .status()
-                    .await?;
-                if copy.success() {
-                    println!("Copied quantized model to models/");
-                }
             } else {
                 anyhow::bail!("AWQ quantization failed. Check python3 and dependencies.");
             }
