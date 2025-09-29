@@ -226,8 +226,8 @@ fn apply_smoothquant_quantize(
 ) -> Int:
     # Compensate act scales
     for ch in range(out_dim):
-    var a_scale : type = max(act_scales[ch], 1e-8_f32)
-    var offset : Int = ch * in_dim
+        var a_scale : type = max(act_scales[ch], 1e-8_f32)
+        var offset : Int = ch * in_dim
         for j in range(in_dim):
             var idx : Int = offset + j
             weight[idx] = weight[idx] / a_scale
