@@ -6,11 +6,11 @@ from collections import List
 alias type = Float32
 
 fn abs_val(x: type) -> type:
-    if x >= 0.0 {
+    if x >= 0.0:
         return x
-    } else {
+    else:
         return -x
-    }
+
 
 # Per-channel max abs (parallelized)
 @export
@@ -44,11 +44,10 @@ fn top_k_indices_c(
     indices: UnsafePointer[Int32]
 ) -> Int:
     var effective_top_k: Int
-    if top_k > hidden_size {
+    if top_k > hidden_size:
         effective_top_k = hidden_size
-    } else {
+    else:
         effective_top_k = top_k
-    }
 
     var vals = List[type]()
     for i in range(effective_top_k):
@@ -112,11 +111,10 @@ fn compute_scale_c(
             salient_max = max(salient_max, act_max[idx])
 
     var scale: type
-    if salient_max > 0.0 {
+    if salient_max > 0.0:
         scale = overall_max / (salient_max + Float32(1e-8))
-    } else {
+    else:
         scale = 1.0
-    }
     scale_out[0] = scale
     return 0
 
@@ -154,7 +152,7 @@ fn compute_smoothquant_scales_c(
     for i in range(hidden_size):
         act_list.append(act_max[i])
 
-    quicksort_desc(mut act_list, 0, hidden_size - 1)
+    quicksort_desc(act_list, 0, hidden_size - 1)
 
     var num_outliers : Int = Int(sparsity * Float32(hidden_size))
     var beta : type = 0.85
@@ -218,20 +216,18 @@ fn apply_awq_quantize(
                 ch_max = max(ch_max, abs_val(weight[idx]))
 
             var ch_scale : type
-            if ch_max > 0.0 {
+            if ch_max > 0.0:
                 ch_scale = ch_max / Float32(qmax_int)
-            } else {
+            else:
                 ch_scale = 1.0
-            }
             for j in range(in_dim):
                 var idx : Int = offset + j
                 var val : type = weight[idx]
                 var sign_adjust: type
-                if val >= 0.0 {
+                if val >= 0.0:
                     sign_adjust = Float32(0.5)
-                } else {
+                else:
                     sign_adjust = Float32(-0.5)
-                }
                 var rounded : type = val / ch_scale + sign_adjust
                 var q_val : Int = Int(rounded)
                 var clamped : Int = max(min(q_val, qmax_int), qmin_int)
@@ -252,9 +248,8 @@ fn apply_smoothquant_quantize(
     # Compensate act scales
     for ch in range(out_dim):
         var a_scale : type = act_scales[ch]
-        if a_scale < Float32(1e-8) {
+        if a_scale < Float32(1e-8):
             a_scale = Float32(1e-8)
-        }
         var offset : Int = ch * in_dim
         for j in range(in_dim):
             var idx : Int = offset + j
@@ -263,6 +258,8 @@ fn apply_smoothquant_quantize(
     # Group quant
     var qmax_int : Int = 127
     var qmin_int : Int = -128
+    var qmax : type = Float32(qmax_int)
+    var qmin : type = Float32(qmin_int)
     for g_start in range(0, out_dim, group_size):
         var g_end : Int = min(g_start + group_size, out_dim)
         var g_max: type = 0.0
@@ -270,9 +267,13 @@ fn apply_smoothquant_quantize(
             var offset : Int = ch * in_dim
             for j in range(in_dim):
                 var idx : Int = offset + j
-                g_max = max(g_max, abs(weight[idx]))
+                g_max = max(g_max, abs_val(weight[idx]))
 
-        var g_scale : type = if g_max > 0.0 { g_max / qmax } else { 1.0 }
+        var g_scale : type
+        if g_max > 0.0:
+            g_scale = g_max / qmax
+        else:
+            g_scale = 1.0
         for ch in range(g_start, g_end):
             var offset : Int = ch * in_dim
             for j in range(in_dim):
