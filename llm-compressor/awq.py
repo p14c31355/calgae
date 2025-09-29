@@ -20,7 +20,9 @@ try:
     mojo_lib.top_k_indices_c.restype = ctypes.c_int
     mojo_lib.compute_scale_c.restype = ctypes.c_int
     mojo_lib.compute_smoothquant_scales_c.restype = ctypes.c_int
-    print("Mojo library loaded successfully.")
+    mojo_lib.apply_awq_quantize_c.restype = ctypes.c_int
+    mojo_lib.apply_smoothquant_quantize_c.restype = ctypes.c_int
+    print("Mojo library loaded successfully with quantization functions.")
 except OSError as e:
     raise RuntimeError(f"Failed to load required Mojo libawq.so: {e}")
 except Exception as e:
@@ -49,8 +51,7 @@ def load_calibration_data(tokenizer, num_samples=128, max_length=2048):
 def collect_activation_statistics(model, inputs, layers_to_collect=32):
     """
     Collect per-output-channel max abs activation for key linear layers.
-    Target: attention (q_proj, k_proj, v_proj, o_proj), mlp (gate_proj, up_proj, down_proj).
-    Accumulate max over calibration samples.
+    Now uses Mojo for channel max computation to speed up.
     """
     model.eval()
     activations = {}  # Dict of layer_name: tensor of per-channel max abs act
@@ -65,14 +66,11 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
             flat_abs = act_abs.view(batch_size * seq_len, hidden_size).cpu().numpy().astype(np.float32)
             channel_max = np.zeros(hidden_size, dtype=np.float32)
 
-            if not mojo_lib:
-                raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
-
-            # Call Mojo per_channel_max_abs_c: abs_output (flat), b*s, hidden_size, out_max
+            # Call Mojo per_channel_max_abs_c
             res = mojo_lib.per_channel_max_abs_c(
                 flat_abs.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
-                ctypes.c_int(batch_size),
-                ctypes.c_int(seq_len),
+                ctypes.c_int(1),  # batch=1 after view
+                ctypes.c_int(batch_size * seq_len),
                 ctypes.c_int(hidden_size),
                 channel_max.ctypes.data_as(ctypes.POINTER(ctypes.c_float))
             )
@@ -114,10 +112,8 @@ def collect_activation_statistics(model, inputs, layers_to_collect=32):
 def find_salient_channels(activations, top_k_percent=0.001):
     """
     Identify top-k% salient output channels per layer based on max abs activation.
+    Uses Mojo for top-k computation.
     """
-    if not mojo_lib:
-        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
-
     salient_channels = {}
     for name, act_max_torch in activations.items():
         act_max = act_max_torch.numpy().astype(np.float32)
@@ -138,10 +134,8 @@ def find_salient_channels(activations, top_k_percent=0.001):
 def compute_scaling_factors(activations, salient_channels):
     """
     Compute per-layer scale: max_all_act / max_salient_act to scale up salient channels.
+    Uses Mojo.
     """
-    if not mojo_lib:
-        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
-
     scales = {}
     for name, act_max_torch in activations.items():
         act_max = act_max_torch.numpy().astype(np.float32)
@@ -164,12 +158,8 @@ def compute_scaling_factors(activations, salient_channels):
 def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
     """
     Compute SmoothQuant scales: Per-channel activation scales to absorb outliers into weights.
-    Based on SmoothQuant paper: Fit activation distribution to quantization range, compensate in weights.
-    sparsity: Fraction of channels to apply heavy scaling (outlier channels).
+    Uses Mojo.
     """
-    if not mojo_lib:
-        raise RuntimeError("Mojo library not loaded. Cannot proceed without it.")
-
     smooth_scales = {}
     for name, act_max_torch in activations.items():
         act_max = act_max_torch.numpy().astype(np.float32)
@@ -189,10 +179,8 @@ def compute_smoothquant_scales(activations, bits=8, sparsity=0.85):
 
 def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=128):
     """
-    Apply AWQ: Scale salient weight channels (output dim), then quantize non-salient to INT4.
-    Salient channels kept in FP16, others per-group INT4 quantized.
-    Equivalent transformation: W' = W * s, quant(W'), then dequant with /s.
-    But for simplicity, store scaled quantized weights.
+    Apply AWQ: Scale salient weight channels, then quantize non-salient to INT4.
+    Now uses Mojo for scaling and quantization to accelerate.
     """
     # Reload model to avoid modifying original
     from transformers import AutoModelForCausalLM
@@ -211,46 +199,37 @@ def apply_awq_quantization(model, salient_channels, scales, bits=4, group_size=1
     
     for hook_name, module in model_name_to_layer.items():
         if hook_name in salient_channels:
-            weight = module.weight.data  # Shape: [in_features, out_features]
-            bias = module.bias.data if module.bias is not None else None
+            weight = module.weight.data.cpu().numpy().astype(np.float32)  # [out, in]
+            bias = module.bias.data.cpu().numpy().astype(np.float32) if module.bias is not None else None
             
-            salient = salient_channels[hook_name]
+            salient = np.array(salient_channels[hook_name], dtype=np.int32)
             scale = scales.get(hook_name, 1.0)
+            out_dim, in_dim = weight.shape  # out_dim = hidden_size for output channels
             
-            # Scale salient output channels (columns)
-            if len(salient) > 0:
-                weight[:, salient] *= scale
+            # Call Mojo to apply scale and quantize
+            res = mojo_lib.apply_awq_quantize_c(
+                weight.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                ctypes.c_int(out_dim),
+                ctypes.c_int(in_dim),
+                ctypes.c_float(scale),
+                salient.ctypes.data_as(ctypes.POINTER(ctypes.c_int)),
+                ctypes.c_int(len(salient)),
+                ctypes.c_int(bits)
+            )
+            if res != 0:
+                raise RuntimeError(f"Mojo apply_awq_quantize_c failed for {hook_name}")
             
-            # Quantize non-salient channels to INT4 per-group
-            out_dim = weight.shape[1]
-            fp16_channels = torch.zeros(out_dim, dtype=torch.bool)
-            fp16_channels[salient] = True
-            
-            for start in range(0, out_dim, group_size):
-                end = min(start + group_size, out_dim)
-                group_mask = ~fp16_channels[start:end]
-                if group_mask.any():
-                    group_weight = weight[:, start:end][:, group_mask]
-                    absmax = group_weight.abs().max()
-                    scale_q = absmax / ((1 << (bits - 1)) - 1)
-                    q_group = torch.round(group_weight / scale_q).clamp(-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
-                    q_group_dequant = q_group.float() * scale_q
-                    group_idx = 0
-                    for i in range(start, end):
-                        if not fp16_channels[i]:
-                            weight[:, i] = q_group_dequant[:, group_idx]
-                            group_idx += 1
-            
-            module.weight.data = weight
+            # Update model weight (and bias if exists)
+            module.weight.data = torch.from_numpy(weight).to(module.weight.device)
             if bias is not None:
-                module.bias.data = bias
+                module.bias.data = torch.from_numpy(bias).to(module.bias.device)
     
     return quantized_model
 
 def apply_smoothquant(quantized_model, activations, smooth_scales, bits=8, group_size=128):
     """
     Apply SmoothQuant: Compensate activation scales in weights, then quantize weights to INT8.
-    Weights are scaled by 1 / act_scale for outlier channels.
+    Uses Mojo for compensation and quantization.
     """
     model_name_to_layer = {}
     for name, module in quantized_model.named_modules():
@@ -263,26 +242,31 @@ def apply_smoothquant(quantized_model, activations, smooth_scales, bits=8, group
     
     for hook_name, module in model_name_to_layer.items():
         if hook_name in smooth_scales:
-            weight = module.weight.data
-            scales_act = torch.tensor(smooth_scales[hook_name])
-            # Compensate: W' = W / act_scale (per output channel)
-            weight *= 1.0 / (scales_act + 1e-8)
+            weight = module.weight.data.cpu().numpy().astype(np.float32)  # [out, in]
+            scales_act = np.array(smooth_scales[hook_name], dtype=np.float32)
+            out_dim, in_dim = weight.shape
             
-            # Quantize all weights to INT8 per-group
-            for start in range(0, weight.shape[1], group_size):
-                end = min(start + group_size, weight.shape[1])
-                group_weight = weight[:, start:end]
-                absmax = group_weight.abs().max()
-                scale_q = absmax / ((1 << (bits - 1)) - 1)
-                q_group = torch.round(group_weight / scale_q).clamp(-(1 << (bits - 1)), (1 << (bits - 1)) - 1)
-                weight[:, start:end] = q_group.float() * scale_q
+            # Call Mojo
+            res = mojo_lib.apply_smoothquant_quantize_c(
+                weight.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                ctypes.c_int(out_dim),
+                ctypes.c_int(in_dim),
+                scales_act.ctypes.data_as(ctypes.POINTER(ctypes.c_float)),
+                ctypes.c_int(bits),
+                ctypes.c_int(group_size)
+            )
+            if res != 0:
+                raise RuntimeError(f"Mojo apply_smoothquant_quantize_c failed for {hook_name}")
+            
+            # Update
+            module.weight.data = torch.from_numpy(weight).to(module.weight.device)
     
     return quantized_model
 
 def quantize_with_awq(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bits=4, protect_ratio=0.001):
     """
     AWQ quantization: activation-aware weight-only quantization per the paper.
-    Protects top 0.1% salient channels in FP16, quantizes others to INT4.
+    All computation now runs through Mojo kernels for speed.
     """
     print(f"Loading model: {model_name}")
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
@@ -309,7 +293,7 @@ def quantize_with_awq(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bit
     scales = compute_scaling_factors(activations, salient_channels)
     print(f"Scaling factors computation time: {time.time() - start_scale:.4f} s")
 
-    print("Applying AWQ quantization...")
+    print("Applying AWQ quantization via Mojo...")
     quantized_model = apply_awq_quantization(model, salient_channels, scales, quant_bits)
     
     print("Saving quantized model...")
@@ -321,18 +305,18 @@ def quantize_with_awq(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bit
     stats = {
         "salient_channels": salient_channels,
         "scales": scales,
-        "method": "AWQ paper-compliant"
+        "method": "AWQ paper-compliant with Mojo acceleration"
     }
     with open(f"{output_dir}/awq_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
     
-    print(f"Quantized model saved to {output_dir}. Salient channels protected in FP16, others in INT4.")
+    print(f"Quantized model saved to {output_dir}. Mojo used for all computations except model I/O.")
     return output_dir
 
 def quantize_with_smoothquant(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", quant_bits=8, sparsity=0.85):
     """
     SmoothQuant: Post-training quantization with activation outlier absorption.
-    Computes per-channel act scales, compensates in weights, quantizes to INT8.
+    All computations via Mojo.
     """
     print(f"Loading model: {model_name}")
     model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.float16, device_map="auto")
@@ -347,10 +331,10 @@ def quantize_with_smoothquant(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", q
     num_layers = len(model.model.layers)
     activations = collect_activation_statistics(model, (input_ids, attention_mask), num_layers)
     
-    print("Computing SmoothQuant scales...")
+    print("Computing SmoothQuant scales via Mojo...")
     smooth_scales = compute_smoothquant_scales(activations, quant_bits, sparsity)
     
-    print("Applying SmoothQuant...")
+    print("Applying SmoothQuant via Mojo...")
     quantized_model = apply_smoothquant(model, activations, smooth_scales, quant_bits)
     
     print("Saving quantized model...")
@@ -361,12 +345,12 @@ def quantize_with_smoothquant(model_name="TinyLlama/TinyLlama-1.1B-Chat-v1.0", q
     # Save stats
     stats = {
         "smooth_scales": smooth_scales,
-        "method": "SmoothQuant paper-compliant"
+        "method": "SmoothQuant paper-compliant with Mojo acceleration"
     }
     with open(f"{output_dir}/smoothquant_stats.json", "w") as f:
         json.dump(stats, f, indent=2)
     
-    print(f"Quantized model saved to {output_dir}. Weights adjusted for activation smoothing, INT8 quantized.")
+    print(f"Quantized model saved to {output_dir}. Computation offloaded to Mojo.")
     return output_dir
 
 if __name__ == "__main__":
