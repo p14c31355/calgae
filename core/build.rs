@@ -28,9 +28,9 @@ fn main() {
     } else {
         "libawq.so"
     };
-    let lib_path = mojo_out.join(lib_filename);
+    let lib_path = out_dir.join(lib_filename);
     if lib_path.exists() {
-        println!("cargo:rustc-link-search=native={}", mojo_out.display());
+        println!("cargo:rustc-link-search=native={}", out_dir.display());
         println!("cargo:rustc-link-lib=dylib=awq");
     } else {
         panic!("Mojo lib not found at expected path: {}", lib_path.display());
