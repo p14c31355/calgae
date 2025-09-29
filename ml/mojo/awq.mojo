@@ -3,9 +3,14 @@ from sys.info import *
 from algorithm import parallelize
 from memory import Pointer, UnsafePointer
 from collections import List
-from math import abs, round
-
 alias type = Float32
+
+fn abs_val(x: type) -> type:
+    if x >= 0.0 {
+        return x
+    } else {
+        return -x
+    }
 
 # Per-channel max abs (parallelized)
 @export
@@ -20,8 +25,7 @@ fn per_channel_max_abs_c(
     for i in range(hidden_size):
         out_max[i] = 0.0
 
-    @parameter
-    fn compute_channel_max(c: Int):
+    for c in range(hidden_size):
         var c_max: type = 0.0
         for b in range(batch_size):
             for s in range(seq_len):
@@ -29,8 +33,6 @@ fn per_channel_max_abs_c(
                 var val: type = abs_output[idx]
                 c_max = max(c_max, val)
         out_max[c] = c_max
-
-    parallelize[compute_channel_max](range(hidden_size))  # Parallel over channels
     return 0
 
 # Top-k indices (min-heap like for top_k)
@@ -41,9 +43,12 @@ fn top_k_indices_c(
     top_k: Int,
     indices: UnsafePointer[Int32]
 ) -> Int:
-    var effective_top_k = top_k
-    if effective_top_k > hidden_size:
+    var effective_top_k: Int
+    if top_k > hidden_size {
         effective_top_k = hidden_size
+    } else {
+        effective_top_k = top_k
+    }
 
     var vals = List[type]()
     for i in range(effective_top_k):
@@ -106,7 +111,12 @@ fn compute_scale_c(
         if 0 <= idx < hidden_size:
             salient_max = max(salient_max, act_max[idx])
 
-    var scale : type = if salient_max > 0.0 { overall_max / (salient_max + 1e-8_f32) } else { 1.0 }
+    var scale: type
+    if salient_max > 0.0 {
+        scale = overall_max / (salient_max + Float32(1e-8))
+    } else {
+        scale = 1.0
+    }
     scale_out[0] = scale
     return 0
 
@@ -146,9 +156,9 @@ fn compute_smoothquant_scales_c(
 
     quicksort_desc(mut act_list, 0, hidden_size - 1)
 
-    var num_outliers : Int = Int(sparsity * type(hidden_size))
+    var num_outliers : Int = Int(sparsity * Float32(hidden_size))
     var beta : type = 0.85
-    var qmax : type = if bits == 8 { 127.0 } else { 7.0 }
+    var qmax : type = Float32((1 << (bits - 1)) - 1)
 
     for i in range(hidden_size):
         scales_out[i] = 1.0
@@ -189,28 +199,43 @@ fn apply_awq_quantize(
             weight[idx] = weight[idx] * scale
 
     # Quantize non-salient
-    var qmax: type = 7.0  # INT4 signed max
-    var qmin: type = -8.0
+
+    var mask = List[Bool]()
+    for i in range(out_dim):
+        mask.append(False)
+    for ch_s in salient_set:
+        mask[ch_s] = True
+
+    var qmax_int : Int = 7
+    var qmin_int : Int = -8
+
     for ch in range(out_dim):
-        var is_salient = False
-        for s in range(len(salient_set)):
-            if salient_set[s] == ch:
-                is_salient = True
-                break
-        if not is_salient:
+        if not mask[ch]:
             var offset : Int = ch * in_dim
             var ch_max: type = 0.0
             for j in range(in_dim):
                 var idx : Int = offset + j
-                ch_max = max(ch_max, abs(weight[idx]))
+                ch_max = max(ch_max, abs_val(weight[idx]))
 
-            var ch_scale : type = if ch_max > 0.0 { ch_max / qmax } else { 1.0 }
+            var ch_scale : type
+            if ch_max > 0.0 {
+                ch_scale = ch_max / Float32(qmax_int)
+            } else {
+                ch_scale = 1.0
+            }
             for j in range(in_dim):
                 var idx : Int = offset + j
                 var val : type = weight[idx]
-                var q_val : type = round(val / ch_scale)
-                var clamped : type = max(min(q_val, qmax), qmin)
-                weight[idx] = clamped * ch_scale
+                var sign_adjust: type
+                if val >= 0.0 {
+                    sign_adjust = Float32(0.5)
+                } else {
+                    sign_adjust = Float32(-0.5)
+                }
+                var rounded : type = val / ch_scale + sign_adjust
+                var q_val : Int = Int(rounded)
+                var clamped : Int = max(min(q_val, qmax_int), qmin_int)
+                weight[idx] = Float32(clamped) * ch_scale
 
     return 0
 
@@ -226,15 +251,18 @@ fn apply_smoothquant_quantize(
 ) -> Int:
     # Compensate act scales
     for ch in range(out_dim):
-        var a_scale : type = max(act_scales[ch], 1e-8_f32)
+        var a_scale : type = act_scales[ch]
+        if a_scale < Float32(1e-8) {
+            a_scale = Float32(1e-8)
+        }
         var offset : Int = ch * in_dim
         for j in range(in_dim):
             var idx : Int = offset + j
             weight[idx] = weight[idx] / a_scale
 
     # Group quant
-    var qmax: type = 127.0
-    var qmin: type = -128.0
+    var qmax_int : Int = 127
+    var qmin_int : Int = -128
     for g_start in range(0, out_dim, group_size):
         var g_end : Int = min(g_start + group_size, out_dim)
         var g_max: type = 0.0
@@ -274,7 +302,7 @@ fn quantize_layer_awq(
         act_max.append(0.0)
     _ = per_channel_max_abs_c(acts_abs, b, s, h, act_max.unsafe_ptr())
 
-    var num_sal : Int = max(1, Int(top_k_p * type(h)))
+    var num_sal : Int = max(1, Int(top_k_p * Float32(h)))
     var sal_idx = List[Int32]()
     for i in range(num_sal):
         sal_idx.append(0)
