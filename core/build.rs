@@ -14,5 +14,5 @@ fn main() {
 
     // Link Mojo runtime for quantization kernels
     println!("cargo:rustc-link-lib=mojo_runtime");
-    println!("cargo:rustc-link-search=native=/usr/local/lib");  // Adjust to actual Mojo lib path
+    println!("cargo:rustc-link-search=native={}", env::var("MOJO_LIB_PATH").unwrap_or_else(|_| "/usr/local/lib".to_string()));  // Set MOJO_LIB_PATH to your Mojo lib directory
 }
