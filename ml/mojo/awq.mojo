@@ -25,14 +25,13 @@ fn per_channel_max_abs_c(
     for i in range(hidden_size):
         out_max[i] = 0.0
 
-    for c in range(hidden_size):
-        var c_max: type = 0.0
-        for b in range(batch_size):
-            for s in range(seq_len):
-                var idx: Int = b * seq_len * hidden_size + s * hidden_size + c
-                var val: type = abs_output[idx]
-                c_max = max(c_max, val)
-        out_max[c] = c_max
+    for b in range(batch_size):
+        for s in range(seq_len):
+            var offset = (b * seq_len + s) * hidden_size
+            for c in range(hidden_size):
+                var val = abs_output[offset + c]
+                if val > out_max[c]:
+                    out_max[c] = val
     return 0
 
 # Top-k indices (min-heap like for top_k)
@@ -263,6 +262,7 @@ fn apply_smoothquant_quantize(
     for g_start in range(0, out_dim, group_size):
         var g_end : Int = min(g_start + group_size, out_dim)
         var g_max: type = 0.0
+        # First pass to find group max
         for ch in range(g_start, g_end):
             var offset : Int = ch * in_dim
             for j in range(in_dim):
@@ -274,12 +274,18 @@ fn apply_smoothquant_quantize(
             g_scale = g_max / qmax
         else:
             g_scale = 1.0
+        # Second pass to quantize
         for ch in range(g_start, g_end):
             var offset : Int = ch * in_dim
             for j in range(in_dim):
                 var idx : Int = offset + j
-                var val : type = weight[idx]
-                var q_val : type = round(val / g_scale)
+                var temp_val : type = weight[idx] / g_scale
+                var sign_adjust: type
+                if temp_val >= 0.0:
+                    sign_adjust = 0.5
+                else:
+                    sign_adjust = -0.5
+                var q_val = Float32(Int(temp_val + sign_adjust))
                 var clamped : type = max(min(q_val, qmax), qmin)
                 weight[idx] = clamped * g_scale
 
