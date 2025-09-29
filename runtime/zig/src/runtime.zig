@@ -36,7 +36,9 @@ pub export fn zig_write_file(fd: libc.c_int, buffer: [*]const u8, len: usize) is
 pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) libc.c_int {
     const allocator = std.heap.page_allocator;
     const stream = std.net.tcpConnectToHost(allocator, std.mem.span(host_ptr), port) catch |err| return -1;
-    return @as(libc.c_int, stream.handle.?.fd);
+    const fd = stream.handle.?.fd;
+    stream.close(); // Close the stream object to prevent resource leaks
+    return @as(libc.c_int, fd);
 }
 
 pub export fn zig_tcp_close(fd: libc.c_int) void {
@@ -46,14 +48,13 @@ pub export fn zig_tcp_close(fd: libc.c_int) void {
 // Threading
 pub export fn zig_spawn_thread(fn_ptr: *const fn () callconv(.C) void) isize {
     var native: libc.pthread_t = undefined;
-    const ptr = @ptrCast(?*libc.c_void, fn_ptr);
     const rc: libc.c_int = libc.pthread_create(&native, null, struct {
         fn thread_main(ptr: ?*libc.c_void) ?*libc.c_void {
             const fn_main = @ptrCast(*const fn () callconv(.C) void, ptr.?);
             fn_main.*();
             return null;
         }
-    }.thread_main, ptr);
+    }.thread_main, @ptrCast(?*anyopaque, fn_ptr));
     if (rc != 0) return -1;
     return @bitCast(isize, native);
 }

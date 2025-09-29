@@ -33,11 +33,12 @@ pub fn build(b: *std.Build) void {
     // Test executable for quantizer
     const test_exe = b.addExecutable(.{
         .name = "test_quantizer",
-        .root_source_file = b.path("test.c"),
-        .target = b.resolveTargetQuery(.{}),
-        .optimize = b.standardOptimizeOption(.{}),
+        // .target and .optimize are set below
     });
+    test_exe.setTarget(b.resolveTargetQuery(.{}));
+    test_exe.setOptimize(b.standardOptimizeOption(.{}));
     test_exe.linkLibC();
+    test_exe.addCSourceFile(.{ .file = b.path("test.c"), .flags = &.{} });
     test_exe.linkLibrary(lib_quantizer);
     test_exe.linkLibrary(lib_runtime);
     b.installArtifact(test_exe);

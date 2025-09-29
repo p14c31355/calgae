@@ -5,22 +5,20 @@ fn main() {
     // Ensure target dir for Zig build
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
-    // Skip Zig build for now to enable Candle inference
-    // TODO: Re-enable after Zig setup
-    // let status_zig = std::process::Command::new("zig")
-    //     .args(&["build", "-Dtarget=x86_64-linux-gnu", "-Doptimize=ReleaseSafe"])
-    //     .current_dir("../runtime")
-    //     .status()
-    //     .expect("Failed to build Zig libs");
-    // if !status_zig.success() {
-    //     panic!("Zig build failed");
-    // }
-    //
-    // // Link Zig libs (assuming zig-out/lib has lib*.so or lib*.a)
-    // println!("cargo:rustc-link-search=native=../runtime/zig-out/lib");
-    // println!("cargo:rustc-link-lib=static=runtime");
-    // println!("cargo:rustc-link-lib=static=quantizer");
-    // println!("cargo:rustc-link-lib=static=llama_wrapper");
+    // Re-enable the Zig build process
+    let status_zig = std::process::Command::new("zig")
+        .args(&["build", "-Dtarget=x86_64-linux-gnu", "-Doptimize=ReleaseSafe"])
+        .current_dir("../runtime/zig") // Corrected path to zig build directory
+        .status()
+        .expect("Failed to build Zig libs");
+    if !status_zig.success() {
+        panic!("Zig build failed");
+    }
+
+    // Link Zig libs (assuming zig-out/lib has lib*.a)
+    println!("cargo:rustc-link-search=native=../runtime/zig/zig-out/lib");
+    println!("cargo:rustc-link-lib=static=runtime");
+    println!("cargo:rustc-link-lib=static=quantizer");
 
     // Skip Mojo build for Candle-only inference
     // TODO: Re-enable after Mojo setup

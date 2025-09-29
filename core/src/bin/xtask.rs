@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::Path;
 use tokio::join;
+use tokio::process::Command;
 use tokio::process::Command as AsyncCommand;
 
 #[derive(Parser)]
@@ -38,59 +39,38 @@ async fn is_command_available(cmd: &str) -> Result<bool> {
     Ok(output.status.success())
 }
 
+async fn run_command(name: &str, cmd: &mut Command) -> Result<()> {
+    println!("Running: {}...", name);
+    let status = cmd.status().await?;
+    if status.success() {
+        println!("Success: {} completed.", name);
+        Ok(())
+    } else {
+        anyhow::bail!("Failed: {} exited with status {}", name, status);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
         Commands::Prepare => {
-            println!("Preparing artifacts (Codon, Mojo)...");
-
             let codon_handle = tokio::spawn(async {
-                println!("Running Codon optimization...");
-                let status = AsyncCommand::new("codon")
-                    .args(["run", "ml/codon/optimize.py", "-o", "models"])
-                    .status()
-                    .await;
-                if let Ok(s) = status {
-                    if s.success() {
-                        println!("Codon optimization completed.");
-                    } else {
-                        eprintln!("Warning: Codon optimization failed.");
-                    }
-                } else {
-                    eprintln!("Failed to run Codon optimization.");
-                }
-                status
+                let mut cmd = AsyncCommand::new("codon");
+                cmd.args(["run", "ml/codon/optimize.py", "-o", "models"]);
+                run_command("Codon optimization", &mut cmd).await
             });
 
             let mojo_handle = tokio::spawn(async {
-                println!("Building Mojo kernels...");
-                let status = AsyncCommand::new("mojo")
-                    .args(["build", "ml/mojo/kernels.mojo", "-o", "models/kernels"])
-                    .status()
-                    .await;
-                if let Ok(s) = status {
-                    if s.success() {
-                        println!("Mojo build completed.");
-                    } else {
-                        eprintln!("Warning: Mojo build failed.");
-                    }
-                } else {
-                    eprintln!("Failed to run Mojo build.");
-                }
-                status
+                let mut cmd = AsyncCommand::new("mojo");
+                cmd.args(["build", "ml/mojo/kernels.mojo", "-o", "models/kernels"]);
+                run_command("Mojo kernel build", &mut cmd).await
             });
 
             let (codon, mojo) = join!(codon_handle, mojo_handle);
-            let codon_status = codon??;
-            let mojo_status = mojo??;
-
-            if codon_status.success() && mojo_status.success() {
-                println!("All preparations completed.");
-            } else {
-                anyhow::bail!("Some preparation tasks failed.");
-            }
+            codon??;
+            mojo??;
 
             Ok(())
         }
