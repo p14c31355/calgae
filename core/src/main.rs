@@ -35,7 +35,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             return Err(anyhow!("No safetensors files found"));
         }
         let output = std::process::Command::new("mojo")
-            .args(&["build", "ml/mojo/awq.mojo", "-o", "awq_bin"])
+            .args(&["build", "../ml/mojo/awq.mojo", "-o", "awq_bin"])
             .output()
             .map_err(|e| anyhow!("Mojo build failed: {}", e))?;
         if !output.status.success() {
