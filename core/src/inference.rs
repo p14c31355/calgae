@@ -39,7 +39,7 @@ impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports Llama-based models like TinyLlama.
     pub fn new(model_path: PathBuf, dtype: Option<DType>) -> Result<Self> {
-        let dtype = dtype.unwrap_or(DType::F32);
+        let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
 
         if !device.is_cuda() {
@@ -85,7 +85,9 @@ impl LlmInference {
 
 
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
+
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)? };
+        info!("Using dtype: {:?}", dtype);
 
         let model = Arc::new(Llama::load(vb, &config)?);
 
@@ -93,7 +95,7 @@ impl LlmInference {
             .ok_or_else(|| anyhow!("EOS token '</s>' not found in tokenizer vocab"))? as u32;
 
         let vocab = tokenizer.get_vocab(false);
-        info!("Model loaded successfully, vocab size: {}", vocab.len());
+        println!("Model loaded successfully, vocab size: {}", vocab.len());
 
         Ok(Self {
             model,
@@ -114,6 +116,7 @@ impl LlmInference {
         top_k: usize,
         top_p: f32,
     ) -> Result<String> {
+        let start = std::time::Instant::now();
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;
         let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
@@ -123,7 +126,7 @@ impl LlmInference {
             return Err(InferenceError::NoOutputError.into());
         }
 
-        let mut cache = Cache::new(true, DType::F32, &self.config, &self.device)?;
+        let mut cache = Cache::new(true, dtype, &self.config, &self.device)?; // Use model's dtype
         let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
         let logits = self.model.forward(&input, 0, &mut cache)?;
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
@@ -131,12 +134,13 @@ impl LlmInference {
         let mut generated_tokens = vec![];
         let last_pos = Tensor::new(&[(prompt_len - 1) as i64], &self.device)?;
         let next_token_logits = logits.index_select(&last_pos, 0usize)?;
-        let next_token = next_token_logits.argmax(1)?.to_scalar::<u32>()?;
+        let next_token = next_token_logits.argmax(0)?.to_scalar::<u32>()?;
         generated_tokens.push(next_token);
         tokens.push(next_token);
 
         if next_token == self.eos_token_id {
             let generated_str = self.tokenizer.decode(&generated_tokens, false).map_err(|e| anyhow!("Decode error: {}", e))?;
+            println!("Inference time: {:?} for EOS early stop", start.elapsed());
             return Ok(generated_str.trim().to_string());
         }
 
@@ -165,8 +169,60 @@ impl LlmInference {
         if response.is_empty() {
             return Err(InferenceError::NoOutputError.into());
         }
+        println!("Inference time: {:?}", start.elapsed());
 
         Ok(response)
+    }
+
+    fn sample_token(
+        logits: &Tensor,
+        temperature: f32,
+        top_k: usize,
+        top_p: f32,
+        vocab_size: usize,
+        device: &Device,
+    ) -> Result<u32> {
+        let mut logits = logits.clone();
+        if temperature == 0.0 {
+            return logits.argmax(0)?.to_scalar::<u32>();
+        }
+
+        logits = logits / temperature;
+
+        // Top-k filtering
+        if top_k > 0 && top_k < vocab_size {
+            let vals, indices = logits.topk(top_k, candle_core::D::Minus1, true, true)?;
+            let mut sorted_logits = vec![f32::MIN; vocab_size];
+            for (i, &idx) in indices.to_vec1::<u32>()?.iter().enumerate() {
+                sorted_logits[idx as usize] = vals.to_vec1::<f32>()?[i];
+            }
+            logits = Tensor::new(&sorted_logits, device)?.to_dtype(DType::F32)?;
+        }
+
+        // Top-p (nucleus) filtering
+        if top_p < 1.0 {
+            let sorted_logits = logits.clone().sort(-1i64)?.0; // descending
+            let cumsum = candle_nn::ops::cumsum(&sorted_logits, candle_core::D::Minus1)?;
+            let sorted_indices = logits.argsort(-1i64, false)?; 
+            let mut filtered_logits = vec![f32::MIN; vocab_size];
+            let mut cum_prob = 0.0f32;
+            for i in 0..vocab_size {
+                let prob = sorted_logits.get(i)?.to_scalar::<f32>()?;
+                cum_prob += prob.exp();
+                if cum_prob > top_p {
+                    break;
+                }
+                let idx = sorted_indices.get(i)?.to_scalar::<u32>()?;
+                filtered_logits[idx as usize] = logits.get(idx as i64)?.to_scalar::<f32>()?;
+            }
+            logits = Tensor::new(&filtered_logits, device)?.to_dtype(DType::F32)?;
+        }
+
+        let probs = candle_nn::ops::softmax(&logits, candle_core::D::Minus1)?;
+        let next_token = candle_nn::distribution::Categorical::new(&probs)?
+            .sample(1, device)?
+            .to_scalar::<u32>()?;
+        Ok(next_token)
     }
 }
 

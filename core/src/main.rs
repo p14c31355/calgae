@@ -1,78 +1,122 @@
-use calgae::agent::run_agent;
+use calgae::agent::Agent;
 use calgae::cli::Args;
 use clap::Parser;
-use std::env;
-use std::fs;
+use std::io::{self, stdout};
 use std::path::PathBuf;
-use anyhow::{anyhow, Result};
+use std::sync::Arc;
+use anyhow::Result as AnyhowResult;
+use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode};
+use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::cursor;
+use crossterm::execute;
+use ratatui::prelude::*;
+use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::text::Line;
 
-const ALGAE_ART: &str = "\n                                 ,---.\n                                /   ,     ,-~^\"#\n                                \\   \\      /  \\\n                                 '---^--^    ^---^ \nCalgae: Lightweight LLM Runtime\n\"Write code for me\" and press Enter for assistance.\n";
+struct AlgaeBlock;
+
+impl Widget for AlgaeBlock {
+    fn render(self, area: Rect, buf: &mut Buffer) {
+        let text = "█▀▀█▀▀█ ▀   █▀▀█▀█▄ ▀█▀▀█▀█▄▀█▀▀█▀\n█▄▄█  █ ▀   █▄▄█  █ ▀█   █ ▀   █\n▀▀▀█▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀";
+        let paragraph = Paragraph::new(Line::raw(text))
+            .block(Block::default()
+                .title("Calgae")
+                .borders(Borders::ALL)
+                .border_style(Style::new().fg(Color::Green)));
+        paragraph.render(area, buf);
+    }
+}
+
+async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResult<()> {
+    enable_raw_mode()?;
+    let mut terminal = Terminal::new(CrosstermBackend::new(stdout()))?;
+
+    execute!(terminal.backend_mut(), EnterAlternateScreen, DisableMouseCapture)?;
+    terminal.clear()?;
+
+    let mut messages = vec![Line::from("█▀▀█▀▀█ ▀   █▀▀█▀█▄ ▀█▀▀█▀█▄▀█▀▀█▀"), Line::from("█▄▄█  █ ▀   █▄▄█  █ ▀█   █ ▀   █"), Line::from("▀▀▀█▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"), Line::from("Calgae: Lightweight LLM Runtime")];
+    let mut input = String::new();
+    let mut should_quit = false;
+
+    while !should_quit {
+        terminal.draw(|f| {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([
+                    Constraint::Length(4),
+                    Constraint::Min(5),
+                    Constraint::Length(3),
+                ])
+                .split(f.area());
+
+            // Header
+            let header = AlgaeBlock;
+            f.render_widget(header, chunks[0]);
+
+            // Messages
+            let messages_block = Paragraph::new(messages.clone())
+                .block(Block::default()
+                    .title("Conversation")
+                    .borders(Borders::ALL));
+            f.render_widget(messages_block, chunks[1]);
+
+            // Input
+            let input_text = format!("Input: {}", input);
+            let input_block = Paragraph::new(Line::raw(input_text))
+                .block(Block::default()
+                    .title("Type your task")
+                    .borders(Borders::ALL));
+            f.render_widget(input_block, chunks[2]);
+            f.set_cursor(chunks[2].x + input.len() as u16 + 8, chunks[2].y + 1); // Set cursor in input
+        })?;
+
+        if let CrosstermEvent::Key(key) = crossterm::event::read()? {
+            match key.code {
+                KeyCode::Enter => {
+                    if !input.trim().is_empty() {
+                        let user_input = input.trim().to_string();
+                        let response = agent.generate_code(&user_input, tokens).await?;
+                        messages.push(Line::from(format!("User: {}", user_input)));
+                        messages.push(Line::from(format!("Calgae: {}", response)));
+                        input.clear();
+                    }
+                }
+                KeyCode::Char(c) => input.push(c),
+                KeyCode::Backspace => { input.pop(); }
+                KeyCode::Esc => should_quit = true,
+                _ => {}
+            }
+        }
+    }
+
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, EnableMouseCapture)?;
+    disable_raw_mode()?;
+    Ok(())
+}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    eprintln!("{}", ALGAE_ART);
+async fn main() -> AnyhowResult<()> {
+    let args = Args::parse();
 
-    let mut args = Args::parse();
-
-    if args.prompt.is_empty() {
-        args.interactive = true;
-    }
+    println!("Model path: {:?}", args.model.display());
 
     if !args.model.exists() {
         eprintln!(
-            "Warning: Model file not found at {:?}. Run `cargo run --bin xtask -- fetch-model` to download it.",
+            "Warning: Model file not found at {:?}. Please download the model.",
             args.model
         );
-    }
-
-    if args.quantize {
-        let model_path = &args.model;
-        let weights: Vec<PathBuf> = fs::read_dir(model_path)?
-            .filter_map(Result::ok)
-            .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
-            .map(|e| e.path())
-            .collect();
-        if weights.is_empty() {
-            return Err(anyhow!("No safetensors files found"));
-        }
-        let current_dir = env::current_dir()?;
-        let build_dir = current_dir.join("target").join("mojo_build");
-        fs::create_dir_all(&build_dir)?;
-        let bin_path = build_dir.join("awq_bin");
-        let output = std::process::Command::new("mojo")
-            .current_dir(&current_dir)
-            .args(&["build", "../ml/mojo/awq.mojo", "-o", bin_path.to_str().unwrap()])
-            .output()
-            .map_err(|e| anyhow!("Mojo build failed: {}", e))?;
-        if !output.status.success() {
-            return Err(anyhow!("Mojo build failed: {}", String::from_utf8_lossy(&output.stderr)));
-        }
-        for weight_path in weights {
-            let mut cmd = std::process::Command::new(bin_path.to_str().unwrap());
-            cmd.arg(args.quantize_mode.clone());
-            if let Some(path_str) = weight_path.to_str() {
-                cmd.arg(path_str);
-            } else {
-                eprintln!("Warning: skipping non-UTF8 path: {}", weight_path.display());
-                continue;
-            }
-            if args.quantize_mode == "awq" {
-                cmd.arg(args.top_k_p.to_string());
-            } else if args.quantize_mode == "smoothquant" {
-                cmd.arg(args.sparsity.to_string());
-            }
-            let output = cmd.output()
-                .map_err(|e| anyhow!("Mojo quantization failed: {}", e))?;
-            if output.status.success() {
-                println!("Quantization completed for {}", weight_path.display());
-            } else {
-                eprintln!("Quantization failed: {}", String::from_utf8_lossy(&output.stderr));
-            }
-        }
-        println!("Quantization finished. Now run the agent.");
         return Ok(());
     }
 
-    run_agent(args.model.clone(), args.prompt.clone(), args.tokens, args.temperature, args.top_k, args.top_p, args.execute, args.interactive).await?;
+    if args.interactive {
+        let agent = Arc::new(Agent::new(args.model.clone(), args.temperature, args.top_k, args.top_p).await?);
+        tui_app(agent, args.tokens, args.execute).await?;
+    } else {
+        let agent = Arc::new(Agent::new(args.model.clone(), args.temperature, args.top_k, args.top_p).await?);
+        let response = agent.generate_code(&args.prompt, args.tokens).await?;
+        println!("Calgae Response:\n{}", response);
+    }
+
     Ok(())
 }

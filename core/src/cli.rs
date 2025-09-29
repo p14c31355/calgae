@@ -13,21 +13,22 @@ pub struct Args {
     )]
     pub prompt: String,
 
-    #[arg(short, long, default_value = "512")]
+    #[arg(long, default_value = "128")]
     pub tokens: usize,
 
     #[arg(short = 't', long, default_value = "0.7")]
     pub temperature: f32,
 
-    #[arg(short, long, default_value = "50")]
+    #[arg(long, default_value = "50")]
     pub top_k: usize,
 
-    #[arg(short, long, default_value = "0.95")]
+    #[arg(long, default_value = "0.95")]
     pub top_p: f32,
 
     #[arg(
         short,
         long,
+        default_value = "models/tinyllama/TinyLlama-1.1B-Chat-v1.0",
         help = "Path to the model directory (HF format)",
         value_name = "PATH"
     )]
@@ -46,10 +47,10 @@ pub struct Args {
     #[arg(short, long, default_value_t = false, help = "Quantize model weights using Mojo")]
     pub quantize: bool,
 
-    #[arg(short, long, default_value = "awq", help = "Quantization mode: awq or smoothquant")]
+    #[arg(long, default_value = "awq", help = "Quantization mode: awq or smoothquant")]
     pub quantize_mode: String,
 
-    #[arg(short, long, default_value = "0.1", help = "Top-k percent for AWQ")]
+    #[arg(long, default_value = "0.1", help = "Top-k percent for AWQ")]
     pub top_k_p: f32,
 
     #[arg(short, long, default_value = "0.2", help = "Sparsity for SmoothQuant")]
