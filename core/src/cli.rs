@@ -43,6 +43,18 @@ pub struct Args {
     )]
     pub interactive: bool,
 
+    #[arg(short, long, default_value_t = false, help = "Quantize model weights using Mojo")]
+    pub quantize: bool,
+
+    #[arg(short, long, default_value = "awq", help = "Quantization mode: awq or smoothquant")]
+    pub quantize_mode: String,
+
+    #[arg(short, long, default_value = "0.1", help = "Top-k percent for AWQ")]
+    pub top_k_p: f32,
+
+    #[arg(short, long, default_value = "0.2", help = "Sparsity for SmoothQuant")]
+    pub sparsity: f32,
+
     // #[arg(short = 'p', long = "parallel", default_value_t = 1, help = "Number of parallel prompts (for multi-task)")]
     // pub parallel: usize, // TODO: Implement multi-turning
 }

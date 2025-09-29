@@ -82,6 +82,30 @@ impl LlmInference {
         if weights.is_empty() {
             return Err(anyhow::anyhow!("No safetensors files found"));
         }
+
+        // Quantize weights using Mojo
+        for weight_path in &weights {
+            let quantized_path = model_path.join(format!("{}_quantized.safetensors", weight_path.file_stem().unwrap().to_str().unwrap()));
+            let output = std::process::Command::new("mojo")
+                .args(&["build", "ml/mojo/awq.mojo", "-o", "awq_bin", "--emit", "exe"])
+                .output()
+                .expect("Failed to build Mojo");
+            if !output.status.success() {
+                return Err(anyhow!("Mojo build failed: {}", String::from_utf8_lossy(&output.stderr)));
+            }
+            let output = std::process::Command::new("./awq_bin")
+                .arg("awq")
+                .arg(weight_path.to_str().unwrap())
+                .arg("0.1")
+                .output()
+                .expect("Failed to run Mojo quantization");
+            if !output.status.success() {
+                return Err(anyhow!("Mojo quantization failed: {}", String::from_utf8_lossy(&output.stderr)));
+            }
+            // Copy quantized to quantized_path (simplified, actual file handling needed)
+            std::fs::copy("quantized_weight.safetensors", &quantized_path).map_err(|e| anyhow!("File copy failed: {}", e))?;
+        }
+
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
         let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)? };
 

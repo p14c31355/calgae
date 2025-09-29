@@ -1,18 +1,35 @@
 use std::env;
 use std::path::PathBuf;
-use std::process::Command;
-use std::fs;
 
 fn main() {
-    println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=runtime/src/runtime.zig");
-    println!("cargo:rerun-if-changed=ml/codon/kernel.codon");
+    // Build Mojo library
+    let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let mojo_out = out_dir.join("awq");
+    let status = std::process::Command::new("mojo")
+        .args(&[
+            "build",
+            "../ml/mojo/awq.mojo",
+            "-o", mojo_out.to_str().unwrap(),
+            "--emit", "shared-lib",
+            "-O3"
+        ])
+        .status()
+        .expect("Failed to build Mojo lib");
 
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR environment variable not set by Cargo"));
-    
-    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    if !status.success() {
+        panic!("Mojo build failed");
+    }
 
-    // Link Mojo runtime for quantization kernels
-    println!("cargo:rustc-link-lib=mojo_runtime");
-    println!("cargo:rustc-link-search=native={}", env::var("MOJO_LIB_PATH").unwrap_or_else(|_| "/usr/local/lib".to_string()));  // Set MOJO_LIB_PATH to your Mojo lib directory
+    // Link the generated lib (assuming it produces libawq.a or similar)
+    let lib_path = mojo_out.join("libawq.so");
+    if lib_path.exists() {
+        println!("cargo:rustc-link-search=native={}", mojo_out.display());
+        println!("cargo:rustc-link-lib=dylib=awq");
+    } else {
+        // Fallback: assume dynamic or find the actual lib
+        panic!("Mojo lib not found at expected path");
+    }
+
+    // Ensure cc dependency is used if needed
+    println!("cargo:rerun-if-changed=../ml/mojo/awq.mojo");
 }
