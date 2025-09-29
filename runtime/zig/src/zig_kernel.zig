@@ -12,7 +12,7 @@ pub export fn matrix_mult(n: usize, p: usize, q: usize, a: [*]const f32, b: [*]c
             var sum: f32 = 0.0;
             var k: usize = 0;
             while (k < q) : (k += 1) {
-                sum += a[i * q + k] * b[k * p + j];
+                sum = @mulAdd(f32, a[i * q + k], b[k * p + j], sum);
             }
             c[i * p + j] = sum;
         }
@@ -36,15 +36,5 @@ test "matrix_mult" {
 }
 
 pub fn main() !void {
-    const allocator = std.heap.page_allocator;
-    const args = try std.process.argsAlloc(allocator);
-    defer std.process.argsFree(allocator, args);
-
-    const stdout = std.io.getStdOut().writer();
-
-    if (args.len > 1) {
-        try stdout.print("Hello, {s}!\n", .{args[1]});
-    } else {
-        try stdout.print("Hello, world!\n", .{});
-    }
+    // Remove main for library use, add if needed for testing
 }

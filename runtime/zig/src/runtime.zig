@@ -3,6 +3,8 @@ const c = @cImport({
     @cInclude("stdint.h");
 });
 
+const kernel = @import("zig_kernel");
+
 // OS abstraction layer for FFI to Rust
 // Provides file IO, networking, and threading primitives via C ABI
 
@@ -57,4 +59,8 @@ pub export fn zig_spawn_thread(fn_ptr: *const fn() callconv(.C) void) c_int {
 pub export fn zig_join_thread(tid: c_int) void {
     const id = @intCast(std.Thread.Id, tid);
     _ = std.Thread.join(id).catchVoid();
+}
+
+pub export fn runtime_matmul(n: usize, p: usize, q: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
+    kernel.matrix_mult(n, p, q, a, b, c);
 }
