@@ -21,13 +21,19 @@ fn main() {
     }
 
     // Link the generated lib (assuming it produces libawq.a or similar)
-    let lib_path = mojo_out.join("libawq.so");
+    let lib_filename = if cfg!(target_os = "windows") {
+        "awq.dll"
+    } else if cfg!(target_os = "macos") {
+        "libawq.dylib"
+    } else {
+        "libawq.so"
+    };
+    let lib_path = mojo_out.join(lib_filename);
     if lib_path.exists() {
         println!("cargo:rustc-link-search=native={}", mojo_out.display());
         println!("cargo:rustc-link-lib=dylib=awq");
     } else {
-        // Fallback: assume dynamic or find the actual lib
-        panic!("Mojo lib not found at expected path");
+        panic!("Mojo lib not found at expected path: {}", lib_path.display());
     }
 
     // Ensure cc dependency is used if needed

@@ -31,15 +31,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
             .map(|e| e.path())
             .collect();
+        if weights.is_empty() {
+            return Err(anyhow!("No safetensors files found"));
+        }
+        let output = std::process::Command::new("mojo")
+            .args(&["build", "ml/mojo/awq.mojo", "-o", "awq_bin"])
+            .output()
+            .map_err(|e| anyhow!("Mojo build failed: {}", e))?;
+        if !output.status.success() {
+            return Err(anyhow!("Mojo build failed: {}", String::from_utf8_lossy(&output.stderr)));
+        }
         for weight_path in weights {
-            let output = std::process::Command::new("mojo")
-                .args(&["build", "ml/mojo/awq.mojo", "-o", "awq_bin"])
-                .output()
-                .map_err(|e| anyhow!("Mojo build failed: {}", e))?;
-            if !output.status.success() {
-                eprintln!("Mojo build failed: {}", String::from_utf8_lossy(&output.stderr));
-                continue;
-            }
             let mut cmd = std::process::Command::new("./awq_bin");
             cmd.arg(args.quantize_mode.clone());
             cmd.arg(weight_path.to_str().unwrap());
