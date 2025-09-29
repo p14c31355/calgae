@@ -1,6 +1,7 @@
 use calgae::agent::run_agent;
 use calgae::cli::Args;
 use clap::Parser;
+use std::env;
 use std::fs;
 use std::path::PathBuf;
 use anyhow::{anyhow, Result};
@@ -34,15 +35,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         if weights.is_empty() {
             return Err(anyhow!("No safetensors files found"));
         }
+        let current_dir = env::current_dir()?;
+        let build_dir = current_dir.join("target").join("mojo_build");
+        fs::create_dir_all(&build_dir)?;
+        let bin_path = build_dir.join("awq_bin");
         let output = std::process::Command::new("mojo")
-            .args(&["build", "../ml/mojo/awq.mojo", "-o", "awq_bin"])
+            .current_dir(&current_dir)
+            .args(&["build", "../ml/mojo/awq.mojo", "-o", bin_path.to_str().unwrap()])
             .output()
             .map_err(|e| anyhow!("Mojo build failed: {}", e))?;
         if !output.status.success() {
             return Err(anyhow!("Mojo build failed: {}", String::from_utf8_lossy(&output.stderr)));
         }
         for weight_path in weights {
-            let mut cmd = std::process::Command::new("./awq_bin");
+            let mut cmd = std::process::Command::new(bin_path.to_str().unwrap());
             cmd.arg(args.quantize_mode.clone());
             if let Some(path_str) = weight_path.to_str() {
                 cmd.arg(path_str);
