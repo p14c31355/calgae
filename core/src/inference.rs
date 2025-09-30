@@ -12,8 +12,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use log::info;
 use std::fs;
+use std::ffi::CString;
+use std::os::raw::c_char;
 use serde_json::Value;
 use thiserror::Error;
+
+extern "C" {
+    fn zig_quantize_model(model_path: *const c_char, bits: u8) -> std::os::raw::c_long;
+}
 
 #[derive(Error, Debug)]
 pub enum InferenceError {
@@ -38,9 +44,22 @@ pub struct LlmInference {
 impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports Llama-based models like TinyLlama.
-    pub fn new(model_path: PathBuf, dtype: Option<DType>) -> Result<Self> {
+    /// Optionally quantizes the model using Zig quantizer before loading.
+    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>) -> Result<Self> {
         let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
+
+        // Optional quantization using Zig
+        if let Some(bits) = quantize_bits {
+            let model_path_str = model_path.to_str().ok_or(anyhow!("Invalid model path"))?;
+            let c_path = CString::new(model_path_str)?;
+            let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits) };
+            if res < 0 {
+                return Err(anyhow!("Zig quantization failed"));
+            }
+            info!("Model quantized to {} bits using Zig", bits);
+            // After quantization, the weights should be in a quantized format; for now, assume we reload as f32 for simplicity
+        }
 
         if !device.is_cuda() {
             info!("Warning: CUDA is not available, this example runs on CPU");
@@ -191,7 +210,7 @@ impl LlmInference {
 
         // Top-k filtering
         if top_k > 0 && top_k < vocab_size {
-            let vals, indices = logits.topk(top_k, candle_core::D::Minus1, true, true)?;
+            let (vals, indices) = logits.topk(top_k, candle_core::D::Minus1, true, true)?;
             let mut sorted_logits = vec![f32::MIN; vocab_size];
             for (i, &idx) in indices.to_vec1::<u32>()?.iter().enumerate() {
                 sorted_logits[idx as usize] = vals.to_vec1::<f32>()?[i];

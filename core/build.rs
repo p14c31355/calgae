@@ -20,39 +20,39 @@ fn main() {
     println!("cargo:rustc-link-lib=static=runtime");
     println!("cargo:rustc-link-lib=static=quantizer");
 
-    // Skip Mojo build for Candle-only inference
-    // TODO: Re-enable after Mojo setup
-    // let mojo_out = out_dir.join("awq");
-    // let status_mojo = std::process::Command::new("mojo")
-    //     .args(&[
-    //         "build",
-    //         "../ml/mojo/awq.mojo",
-    //         "-o", &mojo_out.to_string_lossy(),
-    //         "--emit", "shared-lib",
-    //         "-O3"
-    //     ])
-    //     .status()
-    //     .expect("Failed to build Mojo lib");
-    //
-    // if !status_mojo.success() {
-    //     panic!("Mojo build failed");
-    // }
-    //
-    // let lib_filename = if cfg!(target_os = "windows") {
-    //     "awq.dll"
-    // } else if cfg!(target_os = "macos") {
-    //     "libawq.dylib"
-    // } else {
-    //     "libawq.so"
-    // };
-    // let lib_path = out_dir.join(lib_filename);
-    // if lib_path.exists() {
-    //     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    //     println!("cargo:rustc-link-lib=dylib=awq");
-    // } else {
-    //     panic!("Mojo lib not found at expected path: {}", lib_path.display());
-    // }
+    // Build Mojo AWQ library
+    let mojo_out = out_dir.join("awq");
+    let status_mojo = std::process::Command::new("mojo")
+        .args(&[
+            "build",
+            "../ml/mojo/awq.mojo",
+            "-o", &mojo_out.to_string_lossy(),
+            "--emit", "shared-lib",
+            "-O3"
+        ])
+        .status()
+        .expect("Failed to build Mojo lib");
 
-    // Rerun if changed (removed Mojo and runtime for now)
+    if !status_mojo.success() {
+        panic!("Mojo build failed");
+    }
+
+    let lib_filename = if cfg!(target_os = "windows") {
+        "awq.dll"
+    } else if cfg!(target_os = "macos") {
+        "libawq.dylib"
+    } else {
+        "libawq.so"
+    };
+    let lib_path = mojo_out.join(lib_filename);
+    if lib_path.exists() {
+        println!("cargo:rustc-link-search=native={}", mojo_out.display());
+        println!("cargo:rustc-link-lib=dylib=awq");
+    } else {
+        panic!("Mojo lib not found at expected path: {}", lib_path.display());
+    }
+
+    // Rerun if changed
     println!("cargo:rerun-if-changed=../core/src/");
+    println!("cargo:rerun-if-changed=../ml/mojo/");
 }

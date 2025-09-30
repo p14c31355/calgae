@@ -1,4 +1,4 @@
-use calgae::agent::Agent;
+use calgae::agent::{run_agent, run_interactive_loop};
 use calgae::cli::Args;
 use clap::Parser;
 use std::io::{self, stdout};
@@ -17,8 +17,12 @@ struct AlgaeBlock;
 
 impl Widget for AlgaeBlock {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let text = "█▀▀█▀▀█ ▀   █▀▀█▀█▄ ▀█▀▀█▀█▄▀█▀▀█▀\n█▄▄█  █ ▀   █▄▄█  █ ▀█   █ ▀   █\n▀▀▀█▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀";
-        let paragraph = Paragraph::new(Line::raw(text))
+        let text_lines = vec![
+            Line::raw("█▀▀█▀▀█ ▀   █▀▀█▀█▄ ▀█▀▀█▀█▄▀█▀▀█▀"),
+            Line::raw("█▄▄█  █ ▀   █▄▄█  █ ▀█   █ ▀   █"),
+            Line::raw("▀▀▀█▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
+        ];
+        let paragraph = Paragraph::new(text_lines)
             .block(Block::default()
                 .title("Calgae")
                 .borders(Borders::ALL)
@@ -109,14 +113,31 @@ async fn main() -> AnyhowResult<()> {
         return Ok(());
     }
 
-    if args.interactive {
-        let agent = Arc::new(Agent::new(args.model.clone(), args.temperature, args.top_k, args.top_p).await?);
-        tui_app(agent, args.tokens, args.execute).await?;
-    } else {
-        let agent = Arc::new(Agent::new(args.model.clone(), args.temperature, args.top_k, args.top_p).await?);
-        let response = agent.generate_code(&args.prompt, args.tokens).await?;
-        println!("Calgae Response:\n{}", response);
-    }
+    let quantize_bits = if args.quantize { 
+        Some(
+            match args.quantize_mode.as_str() {
+                "awq" => 4,
+                "smoothquant" => 8,
+                _ => 8,
+            }
+        ) 
+    } else { 
+        None 
+    };
+
+    run_agent(
+        args.model,
+        args.prompt,
+        args.tokens,
+        args.temperature,
+        args.top_k,
+        args.top_p,
+        args.execute,
+        args.interactive,
+        quantize_bits,
+        Some(args.quantize_mode),
+    )
+    .await?;
 
     Ok(())
 }

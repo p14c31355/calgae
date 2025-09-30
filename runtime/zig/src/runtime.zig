@@ -38,8 +38,8 @@ pub export fn zig_write_file(fd: i32, buffer: [*]const u8, len: usize) isize {
 pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) i32 {
     const allocator = std.heap.page_allocator;
     const stream = std.net.tcpConnectToHost(allocator, std.mem.span(host_ptr), port) catch return -1;
-    const fd = stream.handle.fd;
-    stream.close(); // Close the stream object to prevent resource leaks
+    const fd = stream.handle;
+    // stream is dropped here, handle is returned
     return fd;
 }
 
@@ -48,15 +48,15 @@ pub export fn zig_tcp_close(fd: i32) void {
 }
 
 // Threading (simplified, using std.Thread.spawn - assumes caller provides compatible fn)
-pub export fn zig_spawn_thread(entry_fn: *const fn(*anyopaque) callconv(.c) void) isize {
+pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*anyopaque) isize {
     var native: pthread.pthread_t = undefined;
     const rc = pthread.pthread_create(&native, null, entry_fn, null);
     if (rc != 0) return -1;
-    return @bitCast(native);
+    return @bitCast(@as(c_ulong, @intCast(native)));
 }
 
 pub export fn zig_join_thread(handle: isize) void {
-    const native = @as(pthread.pthread_t, handle);
+    const native = @as(pthread.pthread_t, @as(c_ulong, @intCast(handle)));
     _ = pthread.pthread_join(native, null);
 }
 

@@ -43,8 +43,24 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub async fn new(model: std::path::PathBuf, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<Self> {
-        let inference = Arc::new(LlmInference::new(model, None)?);
+    pub async fn new(
+        model: std::path::PathBuf, 
+        temperature: f32, 
+        top_k: usize, 
+        top_p: f32,
+        quantize_bits: Option<u8>,
+        quantize_mode: Option<&str>
+    ) -> AnyhowResult<Self> {
+        let bits = if let Some(bits_opt) = quantize_bits {
+            match quantize_mode {
+                Some("awq") => Some(4u8),
+                Some("smoothquant") => Some(8u8),
+                _ => Some(bits_opt),
+            }
+        } else {
+            None
+        };
+        let inference = Arc::new(LlmInference::new(model, None, bits)?);
         Ok(Agent { inference, temperature, top_k, top_p })
     }
 
@@ -258,8 +274,10 @@ pub async fn run_agent(
     top_p: f32,
     execute: bool,
     interactive: bool,
+    quantize_bits: Option<u8>,
+    quantize_mode: Option<String>,
 ) -> AnyhowResult<()> {
-    let agent = Agent::new(model, temperature, top_k, top_p).await?;
+    let agent = Agent::new(model, temperature, top_k, top_p, quantize_bits, quantize_mode.as_deref()).await?;
 
     if interactive {
         run_interactive_loop(&agent, tokens, execute);

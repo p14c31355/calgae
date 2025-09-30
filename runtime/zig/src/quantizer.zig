@@ -69,7 +69,7 @@ const QuantWorker = struct {
 
         // Parallel quantize and write to quantized_model.bin
         const quantized_path = "models/quantized_model.bin";
-        const out_file = try std.fs.cwd().createFile(quantized_path, .{});
+        var out_file = try std.fs.cwd().createFile(quantized_path, .{});
         defer out_file.close();
 
         var file_mutex = std.Thread.Mutex{};
