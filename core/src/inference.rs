@@ -17,8 +17,13 @@ use std::os::raw::c_char;
 use serde_json::Value;
 use thiserror::Error;
 
+use std::collections::HashMap;
+use foreign_types::ForeignTypeRef;
+
+use candle_core::safetensors::MmapedSafetensors;
+
 extern "C" {
-    fn zig_quantize_model(model_path: *const c_char, bits: u8, output_path: *const c_char) -> std::os::raw::c_long;
+    fn zig_quantize_buffer(input: *const f32, num: i32, bits: u8, output: *mut u8, scale: *mut f32) -> i32;
 }
 
 #[derive(Error, Debug)]
@@ -53,15 +58,36 @@ impl LlmInference {
 
         // Optional quantization using Zig
         if let Some(bits) = quantize_bits {
-            let model_path_str = model_path.to_str().ok_or(anyhow!("Invalid model path"))?;
-            let quantized_path_str = format!("models/quantized_model_{}.bin", bits);
-            let c_path = CString::new(model_path_str)?;
-            let c_output = CString::new(quantized_path_str.as_str())?;
-            let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits, c_output.as_ptr()) };
-            if res < 0 {
-                return Err(anyhow!("Zig quantization failed"));
+            let safetensors_files: Vec<PathBuf> = fs::read_dir(model_path)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
+                .map(|e| e.path())
+                .collect();
+            if safetensors_files.is_empty() {
+                return Err(anyhow!("No safetensors files found in model directory"));
             }
-            info!("Model quantized to {} bits using Zig at {}", bits, quantized_path_str);
+            let quantized_dir = model_path.join(format!("quantized_{}", bits));
+            fs::create_dir_all(&quantized_dir)?;
+            let mut quantize_success = true;
+            for file in safetensors_files {
+                let file_name = file.file_name().ok_or(anyhow!("Invalid file name"))?.to_str().ok_or(anyhow!("Invalid UTF-8 file name"))?;
+                let quantized_file = quantized_dir.join(format!("{}_{}.bin", file_name.strip_suffix(".safetensors").unwrap_or(file_name), bits));
+                let file_path_str = file.to_str().ok_or(anyhow!("Invalid file path"))?;
+                let output_path_str = quantized_file.to_str().ok_or(anyhow!("Invalid output path"))?;
+                let c_path = CString::new(file_path_str)?;
+                let c_output = CString::new(output_path_str)?;
+                let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits as i32, c_output.as_ptr()) };
+                if res < 0 {
+                    quantize_success = false;
+                    error!("Zig quantization failed for {}", file.display());
+                } else {
+                    info!("File {} quantized to {} bits at {}", file.display(), bits, output_path_str);
+                }
+            }
+            if !quantize_success {
+                return Err(anyhow!("Zig quantization failed for one or more files"));
+            }
+            model_path = quantized_dir; // Use quantized directory
         }
 
         if !device.is_cuda() {
@@ -97,8 +123,11 @@ impl LlmInference {
         let config = Arc::new(config);
 
         let weights: Vec<PathBuf> = if quantize_bits.is_some() {
-            let bits = quantize_bits.unwrap();
-            vec![PathBuf::from(format!("models/quantized_model_{}.bin", bits))]
+            fs::read_dir(&model_path)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "bin"))
+                .map(|e| e.path())
+                .collect()
         } else {
             fs::read_dir(&original_dir)?
                 .filter_map(Result::ok)
@@ -107,16 +136,15 @@ impl LlmInference {
                 .collect()
         };
         if weights.is_empty() {
-            return Err(anyhow::anyhow!("No safetensors files found"));
+            return Err(anyhow::anyhow!(if quantize_bits.is_some() { "No quantized bin files found" } else { "No safetensors files found" }));
         }
 
 
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
 
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)? };
-        info!("Using dtype: {:?}", dtype);
-
-        let model = Arc::new(Llama::load(vb, &config)?);
+        // TODO: Implement custom loader for quantized .bin files (i8 tensors)
+        // For now, use safetensors loader; will fail for quantized
+        let model = Arc::new(Llama::load(&mut *vb, &config)?);
 
         let eos_token_id = tokenizer.token_to_id("</s>")
             .ok_or_else(|| anyhow!("EOS token '</s>' not found in tokenizer vocab"))? as u32;
@@ -160,9 +188,10 @@ impl LlmInference {
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
 
         let mut generated_tokens = vec![];
+        let vocab_size = self.config.vocab_size;
         let last_pos = Tensor::new(&[(prompt_len - 1) as i64], &self.device)?;
-        let next_token_logits = logits.index_select(&last_pos, 0usize)?;
-        let next_token = next_token_logits.argmax(1)?.to_scalar::<u32>()?;
+        let next_token_logits = logits.index_select(&last_pos, 0usize)?.squeeze(0)?.to_dtype(DType::F32)?;
+        let next_token = Self::sample_token(&next_token_logits, temperature, top_k, top_p, vocab_size, &self.device)?;
         generated_tokens.push(next_token);
         tokens.push(next_token);
 
@@ -180,7 +209,7 @@ impl LlmInference {
             let logits = self.model.forward(&input, position, &mut cache)?;
             let next_token_logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
 
-            let next_token = next_token_logits.argmax(0)?.to_scalar::<u32>()?;
+            let next_token = Self::sample_token(&next_token_logits, temperature, top_k, top_p, vocab_size, &self.device)?;
             generated_tokens.push(next_token);
             tokens.push(next_token);
             position += 1;
@@ -210,47 +239,79 @@ impl LlmInference {
         vocab_size: usize,
         device: &Device,
     ) -> Result<u32> {
-        let mut logits = logits.clone();
-        if temperature == 0.0 {
-            return logits.argmax(0)?.to_scalar::<u32>();
+        let mut logits_vec: Vec<f32> = logits.to_dtype(DType::F32)?.flatten_all()?.to_vec1()?;
+        if logits_vec.len() != vocab_size {
+            return Err(anyhow!("Logits size mismatch"));
+        }
+        if temperature <= 0.0 {
+            let max_idx = logits_vec.iter().enumerate().fold((0, f32::NEG_INFINITY), |acc, (i, &val)| {
+                if val > acc.1 { (i, val) } else { acc }
+            }).0;
+            return Ok(max_idx as u32);
         }
 
-        logits = logits / temperature;
+        // Scale logits
+        for logit in &mut logits_vec {
+            *logit /= temperature;
+        }
+
+        let mut filtered_logits = logits_vec.clone();
 
         // Top-k filtering
         if top_k > 0 && top_k < vocab_size {
-            let (vals, indices) = logits.topk(top_k, candle_core::D::Minus1, true, true)?;
-            let mut sorted_logits = vec![f32::MIN; vocab_size];
-            for (i, &idx) in indices.to_vec1::<u32>()?.iter().enumerate() {
-                sorted_logits[idx as usize] = vals.to_vec1::<f32>()?[i];
+            let mut indexed: Vec<(f32, usize)> = logits_vec.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+            indexed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
+            let top_k_indices: Vec<usize> = indexed[..std::cmp::min(top_k, vocab_size)].iter().map(|&(_, i)| i).collect();
+            for i in 0..vocab_size {
+                if !top_k_indices.contains(&i) {
+                    filtered_logits[i] = f32::NEG_INFINITY;
+                }
             }
-            logits = Tensor::new(&sorted_logits, device)?.to_dtype(DType::F32)?;
         }
 
-        // Top-p (nucleus) filtering
+        // Top-p filtering
         if top_p < 1.0 {
-            let sorted_logits = logits.clone().sort(-1i64)?.0; // descending
-            let cumsum = candle_nn::ops::cumsum(&sorted_logits, candle_core::D::Minus1)?;
-            let sorted_indices = logits.argsort(-1i64, false)?; 
-            let mut filtered_logits = vec![f32::MIN; vocab_size];
-            let mut cum_prob = 0.0f32;
-            for i in 0..vocab_size {
-                let prob = sorted_logits.get(i)?.to_scalar::<f32>()?;
-                cum_prob += prob.exp();
-                if cum_prob > top_p {
+            let probs: Vec<f32> = {
+                let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
+                let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
+                let sum_exp = exp_logits.iter().sum::<f32>();
+                exp_logits.iter().map(|&e| e / sum_exp).collect()
+            };
+            let mut indexed_probs: Vec<(f32, usize)> = probs.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+            indexed_probs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
+            let mut cumsum = 0.0;
+            let mut cutoff = 0;
+            for &(prob, idx) in &indexed_probs {
+                cumsum += prob;
+                cutoff += 1;
+                if cumsum > top_p {
                     break;
                 }
-                let idx = sorted_indices.get(i)?.to_scalar::<u32>()?;
-                filtered_logits[idx as usize] = logits.get(idx as i64)?.to_scalar::<f32>()?;
             }
-            logits = Tensor::new(&filtered_logits, device)?.to_dtype(DType::F32)?;
+            let nucleus_indices: Vec<usize> = indexed_probs[..cutoff].iter().map(|&(_, i)| i).collect();
+            for i in 0..vocab_size {
+                if !nucleus_indices.contains(&i) {
+                    filtered_logits[i] = f32::NEG_INFINITY;
+                }
+            }
         }
 
-        let probs = candle_nn::ops::softmax(&logits, candle_core::D::Minus1)?;
-        let next_token = candle_nn::distribution::Categorical::new(&probs)?
-            .sample(1, device)?
-            .to_scalar::<u32>()?;
-        Ok(next_token)
+        // Softmax and sample
+        let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
+        let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
+        let sum_exp = exp_logits.iter().sum::<f32>();
+        let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum_exp).collect();
+
+        // Sample
+        let r = rand::random::<f32>();
+        let mut cum = 0.0;
+        for (i, &prob) in probs.iter().enumerate() {
+            cum += prob;
+            if r < cum {
+                return Ok(i as u32);
+            }
+        }
+        Ok((probs.len() - 1) as u32) // fallback
     }
 }
 

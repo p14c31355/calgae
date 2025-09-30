@@ -1,4 +1,4 @@
-use calgae::agent::{run_agent, run_interactive_loop};
+use calgae::agent::run_agent;
 use calgae::cli::Args;
 use clap::Parser;
 use std::io::{self, stdout};
@@ -7,11 +7,14 @@ use std::sync::Arc;
 use anyhow::Result as AnyhowResult;
 use crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyCode};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
-use crossterm::cursor;
 use crossterm::execute;
 use ratatui::prelude::*;
 use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::layout::{Layout, Constraint, Direction};
 use ratatui::text::Line;
+use rand; // for sampling, but already used in inference
+
+use calgae::Agent; // Assume Agent is exported
 
 struct AlgaeBlock;
 
@@ -84,6 +87,10 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
                         messages.push(Line::from(format!("User: {}", user_input)));
                         messages.push(Line::from(format!("Calgae: {}", response)));
                         input.clear();
+                        if execute {
+                            // Assume generate_code returns code, execute it if flag set
+                            std::process::Command::new("sh").arg("-c").arg(&response).status()?; 
+                        }
                     }
                 }
                 KeyCode::Char(c) => input.push(c),
@@ -113,31 +120,27 @@ async fn main() -> AnyhowResult<()> {
         return Ok(());
     }
 
-    let quantize_bits = if args.quantize { 
-        Some(
-            match args.quantize_mode.as_str() {
-                "awq" => 4,
-                "smoothquant" => 8,
-                _ => 8,
-            }
-        ) 
-    } else { 
-        None 
-    };
+    let quantize_bits = if args.quantize { Some(8) } else { None };
 
-    run_agent(
-        args.model,
-        args.prompt,
-        args.tokens,
-        args.temperature,
-        args.top_k,
-        args.top_p,
-        args.execute,
-        args.interactive,
-        quantize_bits,
-        Some(args.quantize_mode),
-    )
-    .await?;
+    if args.interactive {
+        let agent = calgae::Agent::new(args.model.clone(), quantize_bits, None)?;
+        let agent_arc = Arc::new(agent);
+        tui_app(agent_arc, args.tokens, args.execute).await?;
+    } else {
+        run_agent(
+            args.model,
+            args.prompt,
+            args.tokens,
+            args.temperature,
+            args.top_k,
+            args.top_p,
+            args.execute,
+            false, // non-interactive
+            quantize_bits,
+            None, // no mode needed now
+        )
+        .await?;
+    }
 
     Ok(())
 }
