@@ -149,7 +149,7 @@ impl LlmInference {
 
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
 
-        let vb = VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)?;
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device) }?;
 
         // TODO: Implement custom loader for quantized .bin files (i8 tensors)
         // For now, use safetensors loader; will fail for quantized
@@ -288,21 +288,21 @@ impl LlmInference {
         // Top-p filtering
         if top_p < 1.0 {
             let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
-            let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
+            let exp_logits: Vec<f32> = filtered_logits.iter().map(|l| (*l - max_l).exp()).collect();
             let sum_exp = exp_logits.iter().sum::<f32>();
-            let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum_exp).collect();
+            let probs: Vec<f32> = exp_logits.iter().map(|e| *e / sum_exp).collect();
             let mut indexed_probs: Vec<(f32, usize)> = probs.iter().enumerate().map(|(i, &v)| (v, i)).collect();
             indexed_probs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
             let mut cumsum = 0.0;
             let mut cutoff = 0;
-            for &(prob, idx) in &indexed_probs {
-                cumsum += prob;
+            for (prob, _) in indexed_probs.iter() {
+                cumsum += *prob;
                 cutoff += 1;
                 if cumsum > top_p {
                     break;
                 }
             }
-            let nucleus_indices: Vec<usize> = indexed_probs[..cutoff].iter().map(|&(_, i)| i).collect();
+            let nucleus_indices: Vec<usize> = indexed_probs[..cutoff].iter().map(|(_, i)| *i).collect();
             let nucleus_set: HashSet<usize> = nucleus_indices.into_iter().collect();
             for i in 0..vocab_size {
                 if !nucleus_set.contains(&i) {
@@ -313,20 +313,20 @@ impl LlmInference {
 
         // Softmax and sample
         let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
-        let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
+        let exp_logits: Vec<f32> = filtered_logits.iter().map(|l| (*l - max_l).exp()).collect();
         let sum_exp = exp_logits.iter().sum::<f32>();
-        let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum_exp).collect();
+        let probs: Vec<f32> = exp_logits.iter().map(|e| *e / sum_exp).collect();
 
         // Sample
         let r = thread_rng().gen::<f32>();
         let mut cum = 0.0;
-        for (i, &prob) in probs.iter().enumerate() {
+        for (i, prob) in probs.iter().enumerate() {
             cum += prob;
             if r < cum {
                 return Ok(i as u32);
             }
         }
-        Ok((probs.len() - 1) as u32) // fallback
+        Ok((probs.len().saturating_sub(1)) as u32) // fallback
     }
 }
 

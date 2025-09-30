@@ -63,7 +63,10 @@ const QuantWorker = struct {
                 std.log.err("Incomplete f32 at position {}", .{j});
                 return error.IncompleteFloatRead;
             }
-            floats[j] = std.mem.readFloatLittle(f32, byte_buffer[bytes_start..bytes_start + @sizeOf(f32)]);
+            var temp_bytes: [4]u8 = undefined;
+            @memcpy(&temp_bytes, byte_buffer[bytes_start..bytes_start + @sizeOf(f32)]);
+            const int_val: u32 = @bitCast(temp_bytes);
+            floats[j] = @as(f32, @bitCast(int_val));
         }
 
         // Compute dynamic range

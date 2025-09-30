@@ -4,8 +4,9 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const target = b.standardTargetOptions(.{});
 
+
     // Core runtime library
-    const runtime_module = b.addModule("runtime", .{
+    const runtime_module = b.createModule(.{
         .root_source_file = b.path("src/runtime.zig"),
         .target = target,
         .optimize = optimize,
@@ -18,7 +19,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib_runtime);
 
     // Quantizer library
-    const quantizer_module = b.addModule("quantizer", .{
+    const quantizer_module = b.createModule(.{
         .root_source_file = b.path("src/quantizer.zig"),
         .target = target,
         .optimize = optimize,

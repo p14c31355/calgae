@@ -16,7 +16,8 @@ const kernel = @import("zig_kernel.zig");
 
 pub export fn zig_open_file(path_ptr: [*:0]const u8, flags: u32) i32 {
     const mode: std.fs.File.Mode = 0o666;
-    const fd = std.posix.openZ(path_ptr, flags, mode) catch return -1;
+    const open_flags: std.posix.O = @as(std.posix.O, @bitCast(flags));
+    const fd = std.posix.openZ(path_ptr, open_flags, mode) catch return -1;
     return fd;
 }
 
