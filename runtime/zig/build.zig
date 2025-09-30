@@ -31,10 +31,15 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib_quantizer);
 
     // Test executable for quantizer
-    const test_exe = b.addExecutable(.{
-        .name = "test_quantizer",
+    const test_module = b.addModule("test", .{
+        .root_source_file = b.path("test.c"),
         .target = target,
         .optimize = optimize,
+    });
+
+    const test_exe = b.addExecutable(.{
+        .name = "test_quantizer",
+        .root_module = test_module,
     });
     test_exe.addCSourceFile(.{
         .file = b.path("test.c"),
@@ -44,15 +49,11 @@ pub fn build(b: *std.Build) void {
     test_exe.linkLibC();
     test_exe.linkLibrary(lib_quantizer);
     test_exe.linkLibrary(lib_runtime);
-    b.installArtifact(test_exe);
 
-    const run_test = b.addRunArtifact(test_exe);
-    run_test.addArg("../../../models/dummy_model.bin");
 
-    const test_step = b.step("test", "Run the quantizer test");
-    test_step.dependOn(&run_test.step);
+
 
     // Set the default step to install all artifacts.
     // `zig build test` will run the tests.
-    b.default_step.dependOn(b.getInstallStep());
+
 }

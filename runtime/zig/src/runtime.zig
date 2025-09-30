@@ -12,7 +12,7 @@ const kernel = @import("zig_kernel.zig");
 // File IO using std.os for direct fd handling
 pub export fn zig_open_file(path_ptr: [*:0]const u8, flags: u32) libc.c_int {
     const mode = std.os.mode_t(0o666);
-    const fd = std.os.openatZ(std.math.maxInt(std.os.fd_t), path_ptr, flags, mode) catch |err| return -1;
+    const fd = std.os.openatZ(std.math.maxInt(std.os.fd_t), path_ptr, flags, mode) catch return -1;
     return @as(libc.c_int, fd);
 }
 
@@ -22,20 +22,20 @@ pub export fn zig_close_file(fd: libc.c_int) void {
 
 pub export fn zig_read_file(fd: libc.c_int, buffer: [*]u8, len: usize) isize {
     const handle = @as(std.os.fd_t, fd);
-    const n = std.os.read(handle, buffer[0..len]) catch |err| return -1;
-    return @intCast(isize, n);
+    const n = std.os.read(handle, buffer[0..len]) catch return -1;
+    return @intCast(n);
 }
 
 pub export fn zig_write_file(fd: libc.c_int, buffer: [*]const u8, len: usize) isize {
     const handle = @as(std.os.fd_t, fd);
-    const n = std.os.write(handle, buffer[0..len]) catch |err| return -1;
-    return @intCast(isize, n);
+    const n = std.os.write(handle, buffer[0..len]) catch return -1;
+    return @intCast(n);
 }
 
 // Networking (resolve host and connect TCP)
 pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) libc.c_int {
     const allocator = std.heap.page_allocator;
-    const stream = std.net.tcpConnectToHost(allocator, std.mem.span(host_ptr), port) catch |err| return -1;
+    const stream = std.net.tcpConnectToHost(allocator, std.mem.span(host_ptr), port) catch return -1;
     const fd = stream.handle.?.fd;
     stream.close(); // Close the stream object to prevent resource leaks
     return @as(libc.c_int, fd);
@@ -50,13 +50,13 @@ pub export fn zig_spawn_thread(fn_ptr: *const fn () callconv(.C) void) isize {
     var native: libc.pthread_t = undefined;
     const rc: libc.c_int = libc.pthread_create(&native, null, struct {
         fn thread_main(ptr: ?*libc.c_void) ?*libc.c_void {
-            const fn_main = @ptrCast(*const fn () callconv(.C) void, ptr.?);
+            const fn_main: *const fn () callconv(.C) void = @ptrCast(ptr.?);
             fn_main.*();
             return null;
         }
-    }.thread_main, @ptrCast(?*anyopaque, fn_ptr));
+    }.thread_main, fn_ptr);
     if (rc != 0) return -1;
-    return @bitCast(isize, native);
+    return @bitCast(native);
 }
 
 pub export fn zig_join_thread(tid: isize) void {
@@ -64,6 +64,6 @@ pub export fn zig_join_thread(tid: isize) void {
     _ = libc.pthread_join(native, null);
 }
 
-pub export fn runtime_matmul(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
-    kernel.matrix_mult(m, n, p, a, b, c);
+pub export fn runtime_matmul(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c_out: [*]f32) void {
+    kernel.matrix_mult(m, n, p, a, b, c_out);
 }

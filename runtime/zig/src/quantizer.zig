@@ -32,11 +32,11 @@ const QuantWorker = struct {
             std.log.err("Cannot stat {s}: {s}", .{ path, @errorName(err) });
             return err;
         };
-        const num_bytes = @intCast(usize, stat.size);
+        const num_bytes: usize = @intCast(stat.size);
 
         // Read bytes and reinterpret as f32 slice (assume little-endian alignment)
         const byte_buffer = try self.allocator.alloc(u8, num_bytes);
-        defer self.allocator.free(byte_buffer); // This now safely runs only if alloc succeeds
+        defer self.allocator.free(byte_buffer);
 
         const bytes_read = file.readAll(byte_buffer) catch |err| {
             std.log.err("Read failed: {}", .{err});
@@ -47,7 +47,7 @@ const QuantWorker = struct {
             return error.IncompleteRead;
         }
 
-        const floats = std.mem.bytesAsSliceStrict(f32, byte_buffer);
+        const floats = std.mem.bytesAsSlice(f32, byte_buffer);
 
         // Parallel quantize and write to quantized_model.bin (this will overwrite any existing file)
         const quantized_path = "models/quantized_model.bin";
