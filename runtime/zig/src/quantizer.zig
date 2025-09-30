@@ -49,25 +49,13 @@ const QuantWorker = struct {
         }
 
         const num_floats = num_bytes / @sizeOf(f32);
+        _ = num_floats; // autofix
         if (num_bytes % @sizeOf(f32) != 0) {
             std.log.err("File size not multiple of f32 size", .{});
             return error.InvalidFileSize;
         }
-        var floats = try self.allocator.alloc(f32, num_floats);
-        defer self.allocator.free(floats);
 
-        var j: usize = 0;
-        while (j < num_floats) : (j += 1) {
-            const bytes_start = j * @sizeOf(f32);
-            if (bytes_start + @sizeOf(f32) > byte_buffer.len) {
-                std.log.err("Incomplete f32 at position {}", .{j});
-                return error.IncompleteFloatRead;
-            }
-            var temp_bytes: [4]u8 = undefined;
-            @memcpy(&temp_bytes, byte_buffer[bytes_start..bytes_start + @sizeOf(f32)]);
-            const int_val: u32 = @bitCast(temp_bytes);
-            floats[j] = @as(f32, @bitCast(int_val));
-        }
+        const floats = std.mem.bytesAsSlice(f32, byte_buffer);
 
         // Compute dynamic range
         var max_abs: f32 = 0.0;
