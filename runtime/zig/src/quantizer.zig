@@ -47,9 +47,27 @@ const QuantWorker = struct {
             return error.IncompleteRead;
         }
 
-        const floats = std.mem.bytesAsSlice(f32, byte_buffer);
+        const num_floats = num_bytes / @sizeOf(f32);
+        if (num_bytes % @sizeOf(f32) != 0) {
+            std.log.err("File size not multiple of f32 size", .{});
+            return error.InvalidFileSize;
+        }
+        var floats = try self.allocator.alloc(f32, num_floats);
+        defer self.allocator.free(floats);
 
-        // Parallel quantize and write to quantized_model.bin (this will overwrite any existing file)
+        var j: usize = 0;
+        while (j < num_floats) : (j += 1) {
+            const bytes_start = j * 4;
+            const bytes = byte_buffer[bytes_start..std.math.min(bytes_start + 4, byte_buffer.len)];
+            if (bytes.len < 4) {
+                std.log.err("Incomplete f32 at position {}", .{j});
+                return error.IncompleteFloatRead;
+            }
+            const int_val = std.mem.readIntLittle(u32, bytes, .little);
+            floats[j] = @as(f32, @bitCast(int_val));
+        }
+
+        // Parallel quantize and write to quantized_model.bin
         const quantized_path = "models/quantized_model.bin";
         const out_file = try std.fs.cwd().createFile(quantized_path, .{});
         defer out_file.close();
@@ -89,7 +107,7 @@ const QuantWorker = struct {
                     for (ch) |val| {
                         const scaled = @as(i32, @intFromFloat(@round(val * 127.0))); // Simple linear quant to i8
                         const clamped = std.math.clamp(scaled, -128, 127);
-                        local_buf[buf_len] = @as(u8, @bitCast(@as(i8, @intCast(clamped))));
+                        local_buf[buf_len] = @as(u8, @as(i8, @intCast(clamped)));
                         buf_len += 1;
 
                         if (buf_len == 1024) {

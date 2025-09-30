@@ -36,24 +36,14 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-
     const test_exe = b.addExecutable(.{
         .name = "test_quantizer",
         .root_module = test_module,
-    });
-    test_exe.addCSourceFile(.{
-        .file = b.path("test.c"),
-        .flags = &[_][]const u8{},
     });
     test_exe.addIncludePath(b.path("src"));
     test_exe.linkLibC();
     test_exe.linkLibrary(lib_quantizer);
     test_exe.linkLibrary(lib_runtime);
-
-
-
-
-    // Set the default step to install all artifacts.
-    // `zig build test` will run the tests.
+    b.installArtifact(test_exe);
 
 }
