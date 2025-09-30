@@ -6,15 +6,17 @@ const pthread = @cImport({
     @cInclude("pthread.h");
 });
 
+const windows = if (builtin.os.tag == .windows) @cImport({ @cInclude("windows.h"); }) else null;
+
+const builtin = @import("builtin");
 const kernel = @import("zig_kernel.zig");
 
 // OS abstraction layer for FFI to Rust
 // Provides file IO, networking, and threading primitives via C ABI
 
-// File IO using std.os for direct fd handling
 pub export fn zig_open_file(path_ptr: [*:0]const u8, flags: u32) i32 {
     const mode: std.fs.File.Mode = 0o666;
-    const fd = std.posix.openatZ(std.posix.AT_FDCWD, path_ptr, flags, mode) catch return -1;
+    const fd = std.posix.openZ(path_ptr, flags, mode) catch return -1;
     return fd;
 }
 
@@ -40,14 +42,13 @@ pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) i32 {
     const stream = std.net.tcpConnectToHost(allocator, std.mem.span(host_ptr), port) catch return -1;
     const fd = stream.handle;
     // stream is dropped here, handle is returned
-    return fd;
+    return @intCast(fd);
 }
 
 pub export fn zig_tcp_close(fd: i32) void {
     _ = std.posix.close(fd);
 }
 
-// Threading (simplified, using std.Thread.spawn - assumes caller provides compatible fn)
 pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*anyopaque) isize {
     var native: pthread.pthread_t = undefined;
     const rc = pthread.pthread_create(&native, null, entry_fn, null);
@@ -55,8 +56,8 @@ pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*a
     return @bitCast(@as(c_ulong, @intCast(native)));
 }
 
-pub export fn zig_join_thread(handle: isize) void {
-    const native = @as(pthread.pthread_t, @as(c_ulong, @intCast(handle)));
+pub export fn zig_join_thread(handle_: isize) void {
+    const native = @as(pthread.pthread_t, @as(c_ulong, @intCast(handle_)));
     _ = pthread.pthread_join(native, null);
 }
 

@@ -18,7 +18,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 extern "C" {
-    fn zig_quantize_model(model_path: *const c_char, bits: u8) -> std::os::raw::c_long;
+    fn zig_quantize_model(model_path: *const c_char, bits: u8, output_path: *const c_char) -> std::os::raw::c_long;
 }
 
 #[derive(Error, Debug)]
@@ -38,6 +38,7 @@ pub struct LlmInference {
     tokenizer: Arc<Tokenizer>,
     config: Arc<LlamaConfig>,
     device: Device,
+    dtype: DType,
     eos_token_id: u32,
 }
 
@@ -48,27 +49,29 @@ impl LlmInference {
     pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>) -> Result<Self> {
         let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
+        let original_dir = model_path.clone();
 
         // Optional quantization using Zig
         if let Some(bits) = quantize_bits {
             let model_path_str = model_path.to_str().ok_or(anyhow!("Invalid model path"))?;
+            let quantized_path_str = format!("models/quantized_model_{}.bin", bits);
             let c_path = CString::new(model_path_str)?;
-            let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits) };
+            let c_output = CString::new(quantized_path_str.as_str())?;
+            let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits, c_output.as_ptr()) };
             if res < 0 {
                 return Err(anyhow!("Zig quantization failed"));
             }
-            info!("Model quantized to {} bits using Zig", bits);
-            // After quantization, the weights should be in a quantized format; for now, assume we reload as f32 for simplicity
+            info!("Model quantized to {} bits using Zig at {}", bits, quantized_path_str);
         }
 
         if !device.is_cuda() {
             info!("Warning: CUDA is not available, this example runs on CPU");
         }
 
-        let tokenizer_path = model_path.join("tokenizer.json");
+        let tokenizer_path = original_dir.join("tokenizer.json");
         let tokenizer = Arc::new(Tokenizer::from_file(&tokenizer_path).map_err(InferenceError::TokenizerLoadError)?);
 
-        let config_path = model_path.join("config.json");
+        let config_path = original_dir.join("config.json");
         let config_str = fs::read_to_string(&config_path).map_err(|e| anyhow!("Failed to read config.json: {}", e))?;
         let config_value: Value = serde_json::from_str(&config_str).map_err(|e| anyhow!("Failed to parse config.json: {}", e))?;
 
@@ -93,11 +96,16 @@ impl LlmInference {
         };
         let config = Arc::new(config);
 
-        let weights: Vec<PathBuf> = fs::read_dir(&model_path)?
-            .filter_map(Result::ok)
-            .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
-            .map(|e| e.path())
-            .collect();
+        let weights: Vec<PathBuf> = if quantize_bits.is_some() {
+            let bits = quantize_bits.unwrap();
+            vec![PathBuf::from(format!("models/quantized_model_{}.bin", bits))]
+        } else {
+            fs::read_dir(&original_dir)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
+                .map(|e| e.path())
+                .collect()
+        };
         if weights.is_empty() {
             return Err(anyhow::anyhow!("No safetensors files found"));
         }
@@ -121,6 +129,7 @@ impl LlmInference {
             tokenizer,
             config,
             device,
+            dtype,
             eos_token_id,
         })
     }
@@ -145,7 +154,7 @@ impl LlmInference {
             return Err(InferenceError::NoOutputError.into());
         }
 
-        let mut cache = Cache::new(true, dtype, &self.config, &self.device)?; // Use model's dtype
+        let mut cache = Cache::new(true, self.dtype, &self.config, &self.device)?; // Use model's dtype
         let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
         let logits = self.model.forward(&input, 0, &mut cache)?;
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;

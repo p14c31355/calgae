@@ -55,4 +55,5 @@ fn main() {
     // Rerun if changed
     println!("cargo:rerun-if-changed=../core/src/");
     println!("cargo:rerun-if-changed=../ml/mojo/");
+    println!("cargo:rerun-if-changed=../runtime/zig/src/");
 }

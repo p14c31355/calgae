@@ -12,9 +12,10 @@ const QuantWorker = struct {
         return .{ .allocator = alloc, .id = id };
     }
 
-    pub fn run_quantization(self: *QuantWorker, model_path: [*:0]const u8, quant_bits: u8) !void {
+    pub fn run_quantization(self: *QuantWorker, model_path: [*:0]const u8, quant_bits: u8, output_path: [*:0]const u8) !void {
         const path = std.mem.span(model_path);
-        std.log.info("Worker {d}: Starting quantization of {s} to {d} bits", .{ self.id, path, quant_bits });
+        const out_path = std.mem.span(output_path);
+        std.log.info("Worker {d}: Starting quantization of {s} to {d} bits, output: {s}", .{ self.id, path, quant_bits, out_path });
 
         // For simplicity, assume quant_bits = 8 (int8), flat f32 model
         if (quant_bits != 8) {
@@ -67,16 +68,27 @@ const QuantWorker = struct {
             floats[j] = @as(f32, @bitCast(int_val));
         }
 
-        // Parallel quantize and write to quantized_model.bin
-        const quantized_path = "models/quantized_model.bin";
-        var out_file = try std.fs.cwd().createFile(quantized_path, .{});
+        // Compute dynamic range
+        var max_abs: f32 = 0.0;
+        for (floats) |val| {
+            const abs_val = if (val >= 0.0) val else -val;
+            if (abs_val > max_abs) {
+                max_abs = abs_val;
+            }
+        }
+        const scale = if (max_abs > 0.0) max_abs / 127.0 else 1.0;
+        std.log.info("Dynamic range: max_abs={}, scale={}", .{ max_abs, scale });
+
+        // Parallel quantize and write to output
+        var out_file = try std.fs.cwd().createFile(out_path, .{});
         defer out_file.close();
 
         var file_mutex = std.Thread.Mutex{};
-        try self.parallel_quant_loop(floats, &out_file, &file_mutex);
+        // Pass scale to parallel loop
+        try self.parallel_quant_loop(floats, scale, &out_file, &file_mutex);
     }
 
-    fn parallel_quant_loop(self: *QuantWorker, floats: []f32, out_file: *std.fs.File, file_mutex: *std.Thread.Mutex) !void {
+    fn parallel_quant_loop(self: *QuantWorker, floats: []f32, scale: f32, out_file: *std.fs.File, file_mutex: *std.Thread.Mutex) !void {
         const work_items = try std.Thread.getCpuCount();
         if (work_items == 0) return error.NoCoresAvailable;
 
@@ -90,8 +102,10 @@ const QuantWorker = struct {
             const chunk = floats[start..end];
             const idx = i;
 
+            const th_scale = scale; // Copy for thread
+
             threads[i] = try std.Thread.spawn(.{}, struct {
-                pub fn task(ch: []f32, id: usize, output_file: *std.fs.File, mutex: *std.Thread.Mutex) !void {
+                pub fn task(ch: []f32, id: usize, scl: f32, output_file: *std.fs.File, mutex: *std.Thread.Mutex) !void {
                     // Helper function to encapsulate the synchronized write
                     const write_buf = struct {
                         fn write(buffer: []const u8, file_writer: *std.fs.File, mtx: *std.Thread.Mutex) !void {
@@ -105,9 +119,9 @@ const QuantWorker = struct {
                     var buf_len: usize = 0;
 
                     for (ch) |val| {
-                        const scaled = @as(i32, @intFromFloat(@round(val * 127.0))); // Simple linear quant to i8
-                        const clamped = std.math.clamp(scaled, -128, 127);
-                        local_buf[buf_len] = @as(u8, @as(i8, @intCast(clamped)));
+                        const dequant = @round(val / scl);
+                        const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
+                        local_buf[buf_len] = @bitCast(@as(i8, @intCast(clamped)));
                         buf_len += 1;
 
                         if (buf_len == 1024) {
@@ -121,22 +135,22 @@ const QuantWorker = struct {
                     }
                     std.log.info("Task {d}: Quantized {d} values", .{ id, ch.len });
                 }
-            }.task, .{ chunk, idx, out_file, file_mutex });
+            }.task, .{ chunk, idx, th_scale, out_file, file_mutex });
         }
 
         // Join all
         for (threads) |thread| {
-            try thread.join();
+            thread.join();
         }
     }
 };
 
-pub export fn zig_quantize_model(model_path_ptr: [*:0]const u8, bits: u8) isize {
+pub export fn zig_quantize_model(model_path_ptr: [*:0]const u8, bits: u8, output_path_ptr: [*:0]const u8) isize {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
     var worker = QuantWorker.init(allocator, 0);
-    worker.run_quantization(model_path_ptr, bits) catch |err| {
+    worker.run_quantization(model_path_ptr, bits, output_path_ptr) catch |err| {
         std.log.err("Quantization failed: {}", .{err});
         return -1; // Failure
     };
