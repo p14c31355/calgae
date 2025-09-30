@@ -90,7 +90,7 @@ const QuantWorker = struct {
         try self.parallel_quant_loop(floats, scale, &out_file, &file_mutex);
     }
 
-    fn parallel_quant_loop(self: *QuantWorker, floats: []f32, scale: f32, out_file: *std.fs.File, file_mutex: *std.Thread.Mutex) !void {
+    fn parallel_quant_loop(self: *QuantWorker, floats: []const f32, scale: f32, out_file: *std.fs.File, file_mutex: *std.Thread.Mutex) !void {
         const work_items = try std.Thread.getCpuCount();
         if (work_items == 0) return error.NoCoresAvailable;
 
@@ -101,28 +101,47 @@ const QuantWorker = struct {
         for (0..work_items) |i| {
             const start = i * chunk_size;
             const end = if (i == work_items - 1) floats.len else (i + 1) * chunk_size;
-            const chunk = floats[start..end];
-            const idx = i;
-
-            const th_scale = scale; // Copy for thread
 
             threads[i] = try std.Thread.spawn(.{}, struct {
-                pub fn task(ch: []f32, id: usize, scl: f32, output_file: *std.fs.File, mutex: *std.Thread.Mutex) !void {
-                    // Helper function to encapsulate the synchronized write
-                    const write_buf = struct {
-                        fn write(buffer: []const u8, file_writer: *std.fs.File, mtx: *std.Thread.Mutex) !void {
-                            mtx.lock();
-                            defer mtx.unlock();
-                            try file_writer.writeAll(buffer);
-}
+                pub fn task(chunk_start: usize, chunk_end: usize, flts: []const f32, scl: f32, output_file: *std.fs.File, mtx: *std.Thread.Mutex, worker_id: usize, alloc: std.mem.Allocator) void {
+                    var quantized_bytes = alloc.alloc(u8, chunk_end - chunk_start) catch return; // On error, skip
+                    defer alloc.free(quantized_bytes);
+
+                    var k: usize = 0;
+                    while (k < chunk_end - chunk_start) : (k += 1) {
+                        const val = flts[chunk_start + k];
+                        const dequant = @round(val / scl);
+                        const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
+                        quantized_bytes[k] = @as(u8, @bitCast(@as(i8, @intCast(clamped))));
+                    }
+
+                    // Write under lock
+                    mtx.lock();
+                    defer mtx.unlock();
+                    _ = output_file.writeAll(quantized_bytes) catch return;
+                    std.log.info("Worker {d} wrote chunk {d}-{d}", .{ worker_id, chunk_start, chunk_end });
+                }
+            }.task, .{ start, end, floats, scale, out_file, file_mutex, self.id, self.allocator });
+        }
+
+        // Join all threads
+        for (threads) |thread| {
+            thread.join();
+        }
+    }
+};
 
 pub export fn zig_quantize_model(model_path: [*:0]const u8, bits_int: i32, output_path: [*:0]const u8) i32 {
     const allocator = std.heap.page_allocator;
-    if (bits_int <= 0 || bits_int > 8) {
+    if (bits_int <= 0) {
         std.log.err("Unsupported bits: {}", .{bits_int});
         return -1;
     }
-    const quant_bits: u8 = @intCast(u8, bits_int);
+    if (bits_int > 8) {
+        std.log.err("Unsupported bits: {}", .{bits_int});
+        return -1;
+    }
+    const quant_bits: u8 = @intCast(bits_int);
 
     var worker = QuantWorker.init(allocator, 0);
     worker.run_quantization(model_path, quant_bits, output_path) catch |err| {
@@ -156,38 +175,7 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
     for (input, 0..) |val, i| {
         const dequant = @round(val / scale);
         const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
-        output_ptr[i] = @bitCast(@as(i8, @intCast(clamped)));
-    }
-
-    return 0;
-}
-    }
-};
-
-pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8, output_ptr: [*]u8, scale_ptr: *f32) isize {
-    if (bits != 8) {
-        std.log.err("Only 8-bit quantization supported", .{});
-        return -1;
-    }
-    if (num == 0) {
-        return 0;
-    }
-
-    const input = input_ptr[0..num];
-    var max_abs: f32 = 0.0;
-    for (input) |val| {
-        const abs_val = if (val >= 0.0) val else -val;
-        if (abs_val > max_abs) {
-            max_abs = abs_val;
-        }
-    }
-    const scale = if (max_abs > 0.0) max_abs / 127.0 else 1.0;
-    scale_ptr.* = scale;
-
-    for (input, 0..) |val, i| {
-        const dequant = @round(val / scale);
-        const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
-        output_ptr[i] = @bitCast(@as(i8, @intCast(clamped)));
+        output_ptr[i] = @as(u8, @bitCast(@as(i8, @intCast(clamped))));
     }
 
     return 0;
