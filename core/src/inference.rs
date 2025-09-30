@@ -153,7 +153,7 @@ impl LlmInference {
         let mut generated_tokens = vec![];
         let last_pos = Tensor::new(&[(prompt_len - 1) as i64], &self.device)?;
         let next_token_logits = logits.index_select(&last_pos, 0usize)?;
-        let next_token = next_token_logits.argmax(0)?.to_scalar::<u32>()?;
+        let next_token = next_token_logits.argmax(1)?.to_scalar::<u32>()?;
         generated_tokens.push(next_token);
         tokens.push(next_token);
 
