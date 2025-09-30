@@ -45,9 +45,6 @@ pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) i32 {
     return @intCast(fd);
 }
 
-pub export fn zig_tcp_close(fd: i32) void {
-    _ = std.posix.close(fd);
-}
 
 pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*anyopaque) isize {
     var native: pthread.pthread_t = undefined;

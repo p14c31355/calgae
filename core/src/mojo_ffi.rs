@@ -68,12 +68,10 @@ unsafe extern "C" {
 }
 */
 
-/* Zig quantizer FFI - commented for Candle-only build
 #[link(name = "quantizer")]
 unsafe extern "C" {
-    fn zig_quantize_model(model_path: *const c_char, bits: u8) -> isize;
+    fn zig_quantize_model(model_path: *const c_char, bits: i32, output_path: *const c_char) -> i32;
 }
-*/
 
 /* Zig llama wrapper FFI (opaque types) - commented for Candle-only build
 #[link(name = "llama_wrapper")]

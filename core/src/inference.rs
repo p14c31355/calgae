@@ -10,20 +10,27 @@ use candle_transformers::models::llama::{Config as LlamaConfig, Llama, Cache, Ll
 use tokenizers::Tokenizer;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use log::info;
+use log::{info, error};
 use std::fs;
 use std::ffi::CString;
 use std::os::raw::c_char;
 use serde_json::Value;
 use thiserror::Error;
 
-use std::collections::HashMap;
+use rand::prelude::*;
+
+use std::collections::{BinaryHeap, HashSet};
+use std::cmp::Reverse;
 use foreign_types::ForeignTypeRef;
 
 use candle_core::safetensors::MmapedSafetensors;
 
 extern "C" {
     fn zig_quantize_buffer(input: *const f32, num: i32, bits: u8, output: *mut u8, scale: *mut f32) -> i32;
+}
+
+extern "C" {
+    fn zig_quantize_model(model_path: *const c_char, bits: i32, output_path: *const c_char) -> i32;
 }
 
 #[derive(Error, Debug)]
@@ -142,6 +149,8 @@ impl LlmInference {
 
         let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
 
+        let vb = VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)?;
+
         // TODO: Implement custom loader for quantized .bin files (i8 tensors)
         // For now, use safetensors loader; will fail for quantized
         let model = Arc::new(Llama::load(&mut *vb, &config)?);
@@ -259,11 +268,18 @@ impl LlmInference {
 
         // Top-k filtering
         if top_k > 0 && top_k < vocab_size {
-            let mut indexed: Vec<(f32, usize)> = logits_vec.iter().enumerate().map(|(i, &v)| (v, i)).collect();
-            indexed.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
-            let top_k_indices: Vec<usize> = indexed[..std::cmp::min(top_k, vocab_size)].iter().map(|&(_, i)| i).collect();
+            let mut heap: BinaryHeap<Reverse<(f32, usize)>> = BinaryHeap::new();
+            for (i, &v) in logits_vec.iter().enumerate() {
+                heap.push(Reverse((v, i)));
+                if heap.len() > top_k {
+                    heap.pop();
+                }
+            }
+            let mut top_k_indices: Vec<usize> = heap.into_iter().map(|Reverse((_, i))| i).collect();
+            top_k_indices.sort(); // Optional, for deterministic order
+            let top_k_set: HashSet<usize> = top_k_indices.into_iter().collect();
             for i in 0..vocab_size {
-                if !top_k_indices.contains(&i) {
+                if !top_k_set.contains(&i) {
                     filtered_logits[i] = f32::NEG_INFINITY;
                 }
             }
@@ -271,12 +287,10 @@ impl LlmInference {
 
         // Top-p filtering
         if top_p < 1.0 {
-            let probs: Vec<f32> = {
-                let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
-                let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
-                let sum_exp = exp_logits.iter().sum::<f32>();
-                exp_logits.iter().map(|&e| e / sum_exp).collect()
-            };
+            let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
+            let exp_logits: Vec<f32> = filtered_logits.iter().map(|&l| (l - max_l).exp()).collect();
+            let sum_exp = exp_logits.iter().sum::<f32>();
+            let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum_exp).collect();
             let mut indexed_probs: Vec<(f32, usize)> = probs.iter().enumerate().map(|(i, &v)| (v, i)).collect();
             indexed_probs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
             let mut cumsum = 0.0;
@@ -289,8 +303,9 @@ impl LlmInference {
                 }
             }
             let nucleus_indices: Vec<usize> = indexed_probs[..cutoff].iter().map(|&(_, i)| i).collect();
+            let nucleus_set: HashSet<usize> = nucleus_indices.into_iter().collect();
             for i in 0..vocab_size {
-                if !nucleus_indices.contains(&i) {
+                if !nucleus_set.contains(&i) {
                     filtered_logits[i] = f32::NEG_INFINITY;
                 }
             }
@@ -303,7 +318,7 @@ impl LlmInference {
         let probs: Vec<f32> = exp_logits.iter().map(|&e| e / sum_exp).collect();
 
         // Sample
-        let r = rand::random::<f32>();
+        let r = thread_rng().gen::<f32>();
         let mut cum = 0.0;
         for (i, &prob) in probs.iter().enumerate() {
             cum += prob;

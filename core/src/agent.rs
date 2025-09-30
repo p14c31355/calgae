@@ -1,5 +1,6 @@
 use super::inference::LlmInference;
 use once_cell::sync::Lazy;
+use log::warn;
 use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
@@ -60,6 +61,17 @@ impl Agent {
         } else {
             None
         };
+
+        if let Some(bits_opt) = quantize_bits {
+            if let Some(mode) = quantize_mode {
+                match mode {
+                    "awq" => if bits_opt != 4 { warn!("Overriding user bits to 4 for AWQ mode"); }
+                    "smoothquant" => if bits_opt != 8 { warn!("Overriding user bits to 8 for SmoothQuant mode"); }
+                    _ => {}
+                }
+            }
+        }
+
         let inference = Arc::new(LlmInference::new(model, None, bits)?);
         Ok(Agent { inference, temperature, top_k, top_p })
     }

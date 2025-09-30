@@ -58,14 +58,12 @@ const QuantWorker = struct {
 
         var j: usize = 0;
         while (j < num_floats) : (j += 1) {
-            const bytes_start = j * 4;
-            const bytes = byte_buffer[bytes_start..@min(bytes_start + 4, byte_buffer.len)];
-            if (bytes.len < 4) {
+            const bytes_start = j * @sizeOf(f32);
+            if (bytes_start + @sizeOf(f32) > byte_buffer.len) {
                 std.log.err("Incomplete f32 at position {}", .{j});
                 return error.IncompleteFloatRead;
             }
-            const int_val = @as(u32, bytes[0]) | (@as(u32, bytes[1]) << 8) | (@as(u32, bytes[2]) << 16) | (@as(u32, bytes[3]) << 24);
-            floats[j] = @as(f32, @bitCast(int_val));
+            floats[j] = std.mem.readFloatLittle(f32, byte_buffer[bytes_start..bytes_start + @sizeOf(f32)]);
         }
 
         // Compute dynamic range
@@ -116,36 +114,53 @@ const QuantWorker = struct {
                             mtx.lock();
                             defer mtx.unlock();
                             try file_writer.writeAll(buffer);
-                        }
-                    }.write;
+}
 
-                    var local_buf: [1024]u8 = undefined;
-                    var buf_len: usize = 0;
+pub export fn zig_quantize_model(model_path: [*:0]const u8, bits_int: i32, output_path: [*:0]const u8) i32 {
+    const allocator = std.heap.page_allocator;
+    if (bits_int <= 0 || bits_int > 8) {
+        std.log.err("Unsupported bits: {}", .{bits_int});
+        return -1;
+    }
+    const quant_bits: u8 = @intCast(u8, bits_int);
 
-                    for (ch) |val| {
-                        const dequant = @round(val / scl);
-                        const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
-                        local_buf[buf_len] = @bitCast(@as(i8, @intCast(clamped)));
-                        buf_len += 1;
+    var worker = QuantWorker.init(allocator, 0);
+    worker.run_quantization(model_path, quant_bits, output_path) catch |err| {
+        std.log.err("Quantization failed: {s}", .{@errorName(err)});
+        return -1;
+    };
 
-                        if (buf_len == 1024) {
-                            try write_buf(local_buf[0..buf_len], output_file, mutex);
-                            buf_len = 0;
-                        }
-                    }
-                    // Final flush
-                    if (buf_len > 0) {
-                        try write_buf(local_buf[0..buf_len], output_file, mutex);
-                    }
-                    std.log.info("Task {d}: Quantized {d} values", .{ id, ch.len });
-                }
-            }.task, .{ chunk, idx, th_scale, out_file, file_mutex });
+    return 0;
+}
+
+pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8, output_ptr: [*]u8, scale_ptr: *f32) isize {
+    if (bits != 8) {
+        std.log.err("Only 8-bit quantization supported", .{});
+        return -1;
+    }
+    if (num == 0) {
+        return 0;
+    }
+
+    const input = input_ptr[0..num];
+    var max_abs: f32 = 0.0;
+    for (input) |val| {
+        const abs_val = if (val >= 0.0) val else -val;
+        if (abs_val > max_abs) {
+            max_abs = abs_val;
         }
+    }
+    const scale = if (max_abs > 0.0) max_abs / 127.0 else 1.0;
+    scale_ptr.* = scale;
 
-        // Join all
-        for (threads) |thread| {
-            thread.join();
-        }
+    for (input, 0..) |val, i| {
+        const dequant = @round(val / scale);
+        const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
+        output_ptr[i] = @bitCast(@as(i8, @intCast(clamped)));
+    }
+
+    return 0;
+}
     }
 };
 

@@ -88,8 +88,17 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
                         messages.push(Line::from(format!("Calgae: {}", response)));
                         input.clear();
                         if execute {
-                            // Assume generate_code returns code, execute it if flag set
-                            std::process::Command::new("sh").arg("-c").arg(&response).status()?; 
+                            // Safely extract and execute suggested command only
+                            if let Some(pos) = response.find("Suggested command: ") {
+                                let cmd_start = pos + 18; // length of "Suggested command: "
+                                if let Some(cmd_end) = response[cmd_start..].find('\n') {
+                                    let cmd = response[cmd_start..cmd_start + cmd_end].trim().to_string();
+                                    if !cmd.is_empty() {
+                                        println!("Executing suggested command: {}", cmd);
+                                        std::process::Command::new("sh").arg("-c").arg(&cmd).status()?;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -123,7 +132,7 @@ async fn main() -> AnyhowResult<()> {
     let quantize_bits = if args.quantize { Some(8) } else { None };
 
     if args.interactive {
-        let agent = calgae::Agent::new(args.model.clone(), quantize_bits, None)?;
+        let agent = calgae::Agent::new(args.model.clone(), 0.7, 40, 0.95, quantize_bits, None).await?;
         let agent_arc = Arc::new(agent);
         tui_app(agent_arc, args.tokens, args.execute).await?;
     } else {
