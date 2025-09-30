@@ -58,12 +58,12 @@ const QuantWorker = struct {
         var j: usize = 0;
         while (j < num_floats) : (j += 1) {
             const bytes_start = j * 4;
-            const bytes = byte_buffer[bytes_start..std.math.min(bytes_start + 4, byte_buffer.len)];
+            const bytes = byte_buffer[bytes_start..@min(bytes_start + 4, byte_buffer.len)];
             if (bytes.len < 4) {
                 std.log.err("Incomplete f32 at position {}", .{j});
                 return error.IncompleteFloatRead;
             }
-            const int_val = std.mem.readIntLittle(u32, bytes, .little);
+            const int_val = @as(u32, bytes[0]) | (@as(u32, bytes[1]) << 8) | (@as(u32, bytes[2]) << 16) | (@as(u32, bytes[3]) << 24);
             floats[j] = @as(f32, @bitCast(int_val));
         }
 
