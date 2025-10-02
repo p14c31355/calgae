@@ -102,11 +102,16 @@ impl LlmInference {
                         error!("Zig quantization failed for tensor {} in file {}", tensor_name, file.display());
                         return Err(anyhow!("Zig quantization failed for tensor {}", tensor_name));
                     } else {
-                        // Write tensor name length, name, scale, data length, and quantized data to the output file
+                        // Write tensor name length, name, scale, shape length, shape, data length, and quantized data to the output file
                         let data_len = res as usize;
+                        let shape = tensor_data.shape().dims();
                         output_file.write_all(&(tensor_name.len() as u32).to_le_bytes())?;
                         output_file.write_all(tensor_name.as_bytes())?;
                         output_file.write_all(&scale.to_le_bytes())?;
+                        output_file.write_all(&(shape.len() as u32).to_le_bytes())?; // Shape length
+                        for &dim in shape.iter() {
+                            output_file.write_all(&(dim as u64).to_le_bytes())?; // Each dimension
+                        }
                         output_file.write_all(&(data_len as u64).to_le_bytes())?;
                         output_file.write_all(&output_buffer[..data_len])?;
                         info!("Tensor {} quantized to {} bits, scale: {}", tensor_name, bits, scale);
@@ -172,7 +177,8 @@ impl LlmInference {
             let mut tensors = std::collections::HashMap::new();
             for file_path in weights {
                 let mut file = File::open(&file_path)?;
-                while let Ok(name_len_bytes) = file.read_exact(&mut [0u8; 4]) {
+                let mut name_len_bytes = [0u8; 4];
+                while file.read_exact(&mut name_len_bytes).is_ok() {
                     let name_len = u32::from_le_bytes(name_len_bytes) as usize;
                     let mut name_bytes = vec![0u8; name_len];
                     file.read_exact(&mut name_bytes)?;
@@ -184,14 +190,25 @@ impl LlmInference {
 
                     // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
                     // For now, assuming the rest of the file is quantized data for this tensor
-                    let mut quantized_data_buffer = Vec::new();
-                    let mut len_bytes = [0u8; 8];
+                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                    file.read_exact(&mut len_bytes)?;
+                    let mut shape_len_bytes = [0u8; 4];
+                    file.read_exact(&mut shape_len_bytes)?;
+                    let shape_len = u32::from_le_bytes(shape_len_bytes) as usize;
+                    let mut shape = Vec::with_capacity(shape_len);
+                    for _ in 0..shape_len {
+                        let mut dim_bytes = [0u8; 8];
+                        file.read_exact(&mut dim_bytes)?;
+                        shape.push(u64::from_le_bytes(dim_bytes) as usize);
+                    }
+
+                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
                     file.read_exact(&mut len_bytes)?;
                     let data_len = u64::from_le_bytes(len_bytes) as usize;
-                    quantized_data_buffer.resize(data_len, 0);
+                    let mut quantized_data_buffer = vec![0; data_len];
                     file.read_exact(&mut quantized_data_buffer)?;
 
-                    let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device)?;
+                    let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device, &shape)?;
                     tensors.insert(tensor_name, dequantized_tensor);
                 }
             }
@@ -292,13 +309,8 @@ impl LlmInference {
         Ok(response)
     }
 
-    fn load_quantized_tensor_from_buffer(buffer: &[u8], bits: u8, scale: f32, device: &Device) -> Result<Tensor> {
-        let num_elements = if bits == 4 {
-            buffer.len() * 2
-        } else {
-            buffer.len()
-        };
-
+    fn load_quantized_tensor_from_buffer(buffer: &[u8], bits: u8, scale: f32, device: &Device, shape: &[usize]) -> Result<Tensor> {
+        let num_elements: usize = shape.iter().product();
         let mut dequantized_data = Vec::with_capacity(num_elements);
 
         if bits == 8 {
@@ -322,7 +334,7 @@ impl LlmInference {
             return Err(anyhow!("Unsupported quantization bits: {}", bits));
         }
 
-        Tensor::new(&dequantized_data, device)
+        Tensor::new(&dequantized_data, device)?.reshape(shape)
     }
 }
 

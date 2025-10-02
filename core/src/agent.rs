@@ -52,23 +52,21 @@ impl Agent {
         quantize_bits: Option<u8>,
         quantize_mode: Option<&str>
     ) -> AnyhowResult<Self> {
-        let bits = quantize_bits.map(|bits_opt| {
-            match quantize_mode {
-                Some("awq") => {
-                    if bits_opt != 4 {
-                        warn!("AWQ mode requires 4-bit quantization. Overriding.");
-                    }
-                    4
+        let bits = match quantize_mode {
+            Some("awq") => {
+                if quantize_bits != Some(4) {
+                    warn!("AWQ mode requires 4-bit quantization. Overriding.");
                 }
-                Some("smoothquant") => {
-                    if bits_opt != 8 {
-                        warn!("SmoothQuant mode requires 8-bit quantization. Overriding.");
-                    }
-                    8
-                }
-                _ => bits_opt,
+                Some(4)
             }
-        });
+            Some("smoothquant") => {
+                if quantize_bits != Some(8) {
+                    warn!("SmoothQuant mode requires 8-bit quantization. Overriding.");
+                }
+                Some(8)
+            }
+            _ => quantize_bits,
+        };
 
         let inference = Arc::new(LlmInference::new(model, None, bits)?);
         Ok(Agent { inference, temperature, top_k, top_p })
