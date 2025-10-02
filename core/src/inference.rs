@@ -22,6 +22,8 @@ use std::fs::File;
 use rand::prelude::*;
 
 use foreign_types::ForeignTypeRef;
+
+const SMOOTHQUANT_SPARSITY: f32 = 0.85;
 use candle_core::safetensors::{SafeTensors, MmapedSafetensors};
 use crate::zig_ffi::{zig_quantize_buffer, zig_quantize_model}; // zig_ffi からインポート
 use crate::mojo_ffi; // mojo_ffi からインポート
@@ -52,7 +54,8 @@ impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports Llama-based models like TinyLlama.
     /// Optionally quantizes the model using Zig quantizer before loading.
-    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>, smoothquant: bool) -> Result<Self> {
+    /// If smoothquant is enabled, a calibration_data_path must be provided for activation maxes collection.
+    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>, smoothquant: bool, calibration_data_path: Option<PathBuf>) -> Result<Self> {
         let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
         let original_dir = model_path.clone();
@@ -84,8 +87,10 @@ impl LlmInference {
 
         let mut scales: Option<Vec<f32>> = None;
         if smoothquant && quantize_bits == Some(8) {
+            let tokenizer_path = original_dir.join("tokenizer.json");
+            let calibration_data_path = calibration_data_path.ok_or_else(|| anyhow!("SmoothQuant requires a calibration_data_path"))?;
             // SmoothQuant calibration
-            let calibrated_scales = Self::calibrate_smoothquant(&config, 0.85, 8)?;
+            let calibrated_scales = Self::calibrate_smoothquant(&config, &original_dir, &tokenizer_path, &calibration_data_path, SMOOTHQUANT_SPARSITY, 8)?;
             scales = Some(calibrated_scales);
         }
 
@@ -272,17 +277,109 @@ impl LlmInference {
         })
     }
 
-    /// Calibrates SmoothQuant scales by simulating per-channel activation maxes for outlier absorption.
-    /// In full implementation, run forward passes on calibration data.
+    fn compute_channel_maxes(x: &Tensor, device: &Device) -> Result<Vec<f32>> {
+        let x_f32 = x.to_dtype(DType::F32)?;
+        let maxes = x_f32.max_dim(1)?; // Max over sequence dimension (dim=1 for [1, seq, hidden])
+        maxes.to_vec1::<f32>()
+    }
+
+    fn update_act_maxes(act_maxes: &mut Vec<f32>, channel_maxes: &[f32]) {
+        for (i, &max_val) in channel_maxes.iter().enumerate() {
+            act_maxes[i] = act_maxes[i].max(max_val);
+        }
+    }
+
+    /// Calibrates SmoothQuant scales by collecting per-channel activation maxes from calibration data.
     /// Returns a vector of scales for each channel (hidden_size).
-    fn calibrate_smoothquant(config: &LlamaConfig, sparsity: f32, bits: u8) -> Result<Vec<f32>> {
+    fn calibrate_smoothquant(
+        config: &LlamaConfig,
+        model_path: &Path,
+        tokenizer_path: &Path,
+        calibration_data_path: &Path,
+        sparsity: f32,
+        bits: u8,
+    ) -> Result<Vec<f32>> {
         if bits != 8 {
             return Err(anyhow!("SmoothQuant calibration requires 8-bit quantization"));
         }
         let hidden_size = config.hidden_size;
-        // Simulate act_maxes (placeholder: uniform 1.0; full: collect from model forwards)
-        let act_maxes = vec![1.0f32; hidden_size];
-        info!("SmoothQuant act_maxes simulated for hidden_size {}", hidden_size);
+        let device = Device::Cpu; // Calibration runs on CPU
+
+        // Temporarily load model and tokenizer for calibration
+        let tokenizer = Arc::new(Tokenizer::from_file(tokenizer_path).map_err(InferenceError::TokenizerLoadError)?);
+        let weights: Vec<PathBuf> = fs::read_dir(model_path)?
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
+            .map(|e| e.path())
+            .collect();
+        if weights.is_empty() {
+            return Err(anyhow!("No safetensors files found in model directory for calibration"));
+        }
+        let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
+        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, DType::F16, &device) }?; // Use F16 for calibration
+        let model = Llama::load(vb, config)?;
+
+        // Collect activation maxes
+        let mut act_maxes = vec![0.0f32; hidden_size];
+        let calibration_data = fs::read_to_string(calibration_data_path)?;
+        let prompts: Vec<&str> = calibration_data.lines().filter(|s| !s.trim().is_empty()).collect();
+
+        if prompts.is_empty() {
+            return Err(anyhow!("Calibration data file is empty or contains no valid prompts."));
+        }
+
+        info!("Collecting activation maxes from {} calibration prompts...", prompts.len());
+
+        for prompt in prompts {
+            let encoding = tokenizer.encode(prompt, true)
+                .map_err(|e| anyhow!("Tokenizer encode error during calibration: {}", e))?;
+            let tokens: Vec<u32> = encoding.get_ids().to_vec();
+
+            if tokens.is_empty() {
+                continue;
+            }
+
+        let seq_len = tokens.len();
+        let input_ids = Tensor::new(tokens.as_slice(), &device)?.unsqueeze(0)?;
+        let position_ids = Tensor::arange(0i64, seq_len as i64, &device)?.unsqueeze(0)?;
+        let mut cache = Cache::new(true, DType::F16, config, &device)?;
+
+        // Custom forward pass to collect intermediate activations for SmoothQuant
+        // Collect maxes from attention and MLP inputs (after RMSNorm)
+        let mut x = model.embed_tokens.forward(&input_ids)?;
+
+        for layer_idx in 0..config.num_hidden_layers {
+            // Attention input: after first RMSNorm
+            let x_norm = model.layers[layer_idx].rms_norm.forward(&x)?;
+            let attn_maxes = compute_channel_maxes(&x_norm, &device)?;
+            update_act_maxes(&mut act_maxes, &attn_maxes);
+
+            // Attention forward
+            let attn_out = model.layers[layer_idx].attn.forward(&x_norm, &position_ids, &mut cache.kv_cache[layer_idx])?;
+            x = (x + attn_out)?;
+
+            // MLP input: after second RMSNorm
+            let x_norm_mlp = model.layers[layer_idx].mlp_norm.forward(&x)?;
+            let mlp_maxes = compute_channel_maxes(&x_norm_mlp, &device)?;
+            update_act_maxes(&mut act_maxes, &mlp_maxes);
+
+            // MLP forward
+            let mlp_out = model.layers[layer_idx].mlp.forward(&x_norm_mlp)?;
+            x = (x + mlp_out)?;
+        }
+
+        // Final norm (lm_head not needed for calibration)
+        let _ = model.norm.forward(&x)?;
+        }
+
+        // Ensure all act_maxes are positive (avoid division by zero later)
+        for max_val in &mut act_maxes {
+            if *max_val == 0.0 {
+                *max_val = 1.0;
+            }
+        }
+
+        info!("SmoothQuant act_maxes collected for hidden_size {}", hidden_size);
 
         let mut calibrated_scales = vec![0.0f32; hidden_size];
         let res = unsafe {
