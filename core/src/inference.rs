@@ -177,37 +177,49 @@ impl LlmInference {
             let mut tensors = std::collections::HashMap::new();
             for file_path in weights {
                 let mut file = File::open(&file_path)?;
-                let mut name_len_bytes = [0u8; 4];
-                while file.read_exact(&mut name_len_bytes).is_ok() {
-                    let name_len = u32::from_le_bytes(name_len_bytes) as usize;
-                    let mut name_bytes = vec![0u8; name_len];
-                    file.read_exact(&mut name_bytes)?;
-                    let tensor_name = String::from_utf8(name_bytes)?;
+                loop {
+                    let mut name_len_bytes = [0u8; 4];
+                    match file.read_exact(&mut name_len_bytes) {
+                        Ok(()) => {
+                            let name_len = u32::from_le_bytes(name_len_bytes) as usize;
+                            let mut name_bytes = vec![0u8; name_len];
+                            file.read_exact(&mut name_bytes)?;
+                            let tensor_name = String::from_utf8(name_bytes)?;
 
-                    let mut scale_bytes = [0u8; 4];
-                    file.read_exact(&mut scale_bytes)?;
-                    let scale = f32::from_le_bytes(scale_bytes);
+                            let mut scale_bytes = [0u8; 4];
+                            file.read_exact(&mut scale_bytes)?;
+                            let scale = f32::from_le_bytes(scale_bytes);
 
-                    // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
-                    // For now, assuming the rest of the file is quantized data for this tensor
-                    let mut shape_len_bytes = [0u8; 4];
-                    file.read_exact(&mut shape_len_bytes)?;
-                    let shape_len = u32::from_le_bytes(shape_len_bytes) as usize;
-                    let mut shape = Vec::with_capacity(shape_len);
-                    for _ in 0..shape_len {
-                        let mut dim_bytes = [0u8; 8];
-                        file.read_exact(&mut dim_bytes)?;
-                        shape.push(u64::from_le_bytes(dim_bytes) as usize);
+                            // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
+                            // For now, assuming the rest of the file is quantized data for this tensor
+                            let mut shape_len_bytes = [0u8; 4];
+                            file.read_exact(&mut shape_len_bytes)?;
+                            let shape_len = u32::from_le_bytes(shape_len_bytes) as usize;
+                            let mut shape = Vec::with_capacity(shape_len);
+                            for _ in 0..shape_len {
+                                let mut dim_bytes = [0u8; 8];
+                                file.read_exact(&mut dim_bytes)?;
+                                shape.push(u64::from_le_bytes(dim_bytes) as usize);
+                            }
+
+                            let mut data_len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                            file.read_exact(&mut data_len_bytes)?;
+                            let data_len = u64::from_le_bytes(data_len_bytes) as usize;
+                            let mut quantized_data_buffer = vec![0; data_len];
+                            file.read_exact(&mut quantized_data_buffer)?;
+
+                            let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device, &shape)?;
+                            tensors.insert(tensor_name, dequantized_tensor);
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                            // End of file reached, break loop
+                            break;
+                        }
+                        Err(e) => {
+                            // Propagate other errors
+                            return Err(e.into());
+                        }
                     }
-
-                    let mut data_len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
-                    file.read_exact(&mut data_len_bytes)?;
-                    let data_len = u64::from_le_bytes(data_len_bytes) as usize;
-                    let mut quantized_data_buffer = vec![0; data_len];
-                    file.read_exact(&mut quantized_data_buffer)?;
-
-                    let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device, &shape)?;
-                    tensors.insert(tensor_name, dequantized_tensor);
                 }
             }
             VarBuilder::from_tensors(tensors, dtype, &device)

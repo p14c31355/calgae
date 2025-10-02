@@ -4,7 +4,8 @@ pub fn add(a: i32, b: i32) i32 {
     return a + b;
 }
 
-// matrix_mult multiplies A (m x n) by B (n x p) and stores the result in C (m x p).
+// matrix_mult multiplies matrix A (m x n) by matrix B (n x p) and stores the result in C (m x p).
+// All matrices are assumed to be in row-major order.
 pub export fn matrix_mult(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
     var i: usize = 0;
     while (i < m) : (i += 1) {

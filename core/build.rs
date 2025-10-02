@@ -2,6 +2,9 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let zig_root = manifest_dir.join("../runtime/zig");
+
     // Ensure target dir for Zig build
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
@@ -11,7 +14,7 @@ fn main() {
 
     let status_zig = std::process::Command::new("zig")
         .args(&["build", &format!("-Dtarget={}", zig_target), "-Doptimize=ReleaseSafe"])
-        .current_dir("../runtime/zig") // Corrected path to zig build directory
+        .current_dir(&zig_root)
         .status()
         .expect("Failed to build Zig libs");
     if !status_zig.success() {
@@ -19,16 +22,17 @@ fn main() {
     }
 
     // Link Zig libs (assuming zig-out/lib has lib*.a)
-    println!("cargo:rustc-link-search=native=../runtime/zig/zig-out/lib");
+    println!("cargo:rustc-link-search=native={}", zig_root.join("zig-out/lib").display());
     println!("cargo:rustc-link-lib=static=runtime");
     println!("cargo:rustc-link-lib=static=quantizer");
 
     // Build Mojo AWQ library
     let mojo_out = out_dir.join("awq");
+    let mojo_awq_path = manifest_dir.join("../ml/mojo/awq.mojo");
     let status_mojo = std::process::Command::new("mojo")
         .args(&[
             "build",
-            "../ml/mojo/awq.mojo",
+            &mojo_awq_path.to_string_lossy(),
             "-o", &mojo_out.to_string_lossy(),
             "--emit", "shared-lib",
             "-O3"
