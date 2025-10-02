@@ -159,7 +159,7 @@ impl LlmInference {
             .ok_or_else(|| anyhow!("EOS token '</s>' not found in tokenizer vocab"))? as u32;
 
         let vocab = tokenizer.get_vocab(false);
-        println!("Model loaded successfully, vocab size: {}", vocab.len());
+        info!("Model loaded successfully, vocab size: {}", vocab.len());
 
         Ok(Self {
             model,
