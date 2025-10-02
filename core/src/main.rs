@@ -100,7 +100,7 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
                                     }
                                 }
                             }
-                    } // KeyCode::Enter の閉じ括弧
+                    } 
                 }
                 KeyCode::Char(c) => input.push(c),
                 KeyCode::Backspace => { input.pop(); }
