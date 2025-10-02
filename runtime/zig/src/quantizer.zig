@@ -49,13 +49,13 @@ const QuantWorker = struct {
         }
 
         const num_floats = num_bytes / @sizeOf(f32);
-        _ = num_floats; // autofix
         if (num_bytes % @sizeOf(f32) != 0) {
             std.log.err("File size not multiple of f32 size", .{});
             return error.InvalidFileSize;
         }
 
-        const floats = std.mem.bytesAsSlice(f32, byte_buffer);
+        std.debug.assert(std.mem.isAligned(@intFromPtr(byte_buffer.ptr), @alignOf(f32)));
+        const floats: []const f32 = @as([*]const f32, @ptrCast(byte_buffer.ptr))[0..num_floats];
 
         // Compute dynamic range
         var max_abs: f32 = 0.0;
