@@ -287,7 +287,7 @@ impl LlmInference {
 
         // Top-p filtering
         if top_p < 1.0 {
-            let max_l = *filtered_logits.iter().max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal)).unwrap_or(&0.0);
+            let max_l = filtered_logits.iter().copied().filter(|f| f.is_finite()).reduce(f32::max).unwrap_or(0.0);
             let exp_logits: Vec<f32> = filtered_logits.iter().map(|l| (*l - max_l).exp()).collect();
             let sum_exp = exp_logits.iter().sum::<f32>();
             let probs: Vec<f32> = exp_logits.iter().map(|e| *e / sum_exp).collect();
