@@ -80,6 +80,9 @@ impl LlmInference {
                 let mut output_file = File::create(&quantized_output_path)?;
 
                 for (tensor_name, tensor_info) in tensors.iter() {
+                    // This implementation loads the entire tensor into memory as a Vec<f32> before quantization.
+                    // For large models, this can lead to very high memory consumption, which contradicts the project's goal of minimizing resource usage.
+                    // Consider refactoring this to process tensors in smaller chunks or streams to keep memory usage low.
                     let tensor_data = mmaped.load_tensor(tensor_info, &device)?;
                     let tensor_data_f32 = tensor_data.to_dtype(DType::F32)?.to_vec1::<f32>()?;
 

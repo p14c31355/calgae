@@ -1,5 +1,10 @@
 const std = @import("std");
 
+// This newly added file appears to be dead code. It provides a Zig wrapper for the llama.cpp C API,
+// but the project's inference engine is built on candle. Furthermore, this file is not referenced
+// in the build.zig script, so it's not being compiled or linked.
+//
+// To improve code hygiene and avoid confusion, it would be best to remove this file if it's not planned for immediate use.
 // Thin Zig wrapper for llama.cpp C API
 // Assumes llama.cpp is built and llama.h is available.
 // This provides C ABI exports for Rust to use via C FFI.
