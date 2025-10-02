@@ -85,17 +85,7 @@ impl LlmInference {
         let mut scales: Option<Vec<f32>> = None;
         if smoothquant && quantize_bits == Some(8) {
             // SmoothQuant calibration
-            let mut calibrated_scales = vec![0.0f32; config.hidden_size];
-            let act_maxes = Self::simulate_act_maxes(config.hidden_size); // Simulate act_maxes for now
-            unsafe {
-                mojo_ffi::compute_smoothquant_scales_c(
-                    act_maxes.as_ptr(),
-                    config.hidden_size as i32,
-                    0.85, // sparsity=0.85 from SmoothQuant paper
-                    8,    // bits
-                    calibrated_scales.as_mut_ptr(),
-                );
-            }
+            let calibrated_scales = Self::calibrate_smoothquant(&config, 0.85, 8)?;
             scales = Some(calibrated_scales);
         }
 
@@ -282,22 +272,30 @@ impl LlmInference {
     /// Calibrates SmoothQuant scales by simulating per-channel activation maxes for outlier absorption.
     /// In full implementation, run forward passes on calibration data.
     /// Returns a vector of scales for each channel (hidden_size).
-    fn calibrate_smoothquant(config: &LlamaConfig, sparsity: f32, bits: u8) -> Vec<f32> {
+    fn calibrate_smoothquant(config: &LlamaConfig, sparsity: f32, bits: u8) -> Result<Vec<f32>> {
         if bits != 8 {
-            panic!("SmoothQuant calibration requires 8-bit quantization");
+            return Err(anyhow!("SmoothQuant calibration requires 8-bit quantization"));
         }
         let hidden_size = config.hidden_size;
         // Simulate act_maxes (placeholder: uniform 1.0; full: collect from model forwards)
         let act_maxes = vec![1.0f32; hidden_size];
         info!("SmoothQuant act_maxes simulated for hidden_size {}", hidden_size);
-        act_maxes
-    }
 
-    /// Simulates activation maximums for SmoothQuant calibration.
-    /// In a full implementation, this would involve running forward passes on calibration data.
-    fn simulate_act_maxes(hidden_size: usize) -> Vec<f32> {
-        // Placeholder: uniform 1.0; full implementation would collect from model forwards
-        vec![1.0f32; hidden_size]
+        let mut calibrated_scales = vec![0.0f32; hidden_size];
+        let res = unsafe {
+            mojo_ffi::compute_smoothquant_scales_c(
+                act_maxes.as_ptr(),
+                hidden_size as i32,
+                sparsity,
+                bits,
+                calibrated_scales.as_mut_ptr(),
+            )
+        };
+
+        if res != 0 {
+            return Err(anyhow!("Mojo compute_smoothquant_scales_c failed with code {}", res));
+        }
+        Ok(calibrated_scales)
     }
 
     /// Performs efficient inference with KV cache: prefill prompt, then autoregressive decode.

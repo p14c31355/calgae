@@ -10,40 +10,16 @@ pub fn add(a: i32, b: i32) i32 {
 // Note: Actual SIMD intrinsics might require specific target features and more complex setup.
 // This is a simplified example using Zig's vector types.
 pub export fn matrix_mult(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
-    const Vec8f = @Vector(8, f32); // 256-bit AVX2 vector for 8 f32s
-
     var i: usize = 0;
     while (i < m) : (i += 1) {
         var j: usize = 0;
         while (j < p) : (j += 1) {
-            var sum_vec = Vec8f{0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            var sum: f32 = 0.0;
             var k: usize = 0;
-            while (k < n) : (k += 8) { // Process 8 elements at a time
-                // Handle remaining elements if n is not a multiple of 8
-                if (k + 8 > n) {
-                    var sum_scalar: f32 = 0.0;
-                    var k_scalar: usize = k;
-                    while (k_scalar < n) : (k_scalar += 1) {
-                        sum_scalar = @mulAdd(f32, a[i * n + k_scalar], b[k_scalar * p + j], sum_scalar);
-                    }
-                    c[i * p + j] = sum_scalar; // Store scalar result and break
-                    break;
-                }
-
-                // Load 8 elements from A and broadcast one element from B
-                // @ptrCastでポインタにキャストし、それをVec8fのポインタとして扱い、デリファレンスしてロード
-                const a_vec = @as(Vec8f, (@as([*]const Vec8f, @ptrCast(a + (i * n + k))))[0]);
-                const b_scalar = b[k * p + j];
-                const b_vec = @splat(Vec8f, b_scalar); // Broadcast b_scalar to all elements of b_vec
-
-                sum_vec = a_vec * b_vec + sum_vec;
+            while (k < n) : (k += 1) {
+                sum = @mulAdd(f32, a[i * n + k], b[k * p + j], sum);
             }
-            // Sum up the elements in sum_vec to get the final scalar sum
-            var final_sum: f32 = 0.0;
-            for (sum_vec) |val| {
-                final_sum += val;
-            }
-            c[i * p + j] = final_sum;
+            c[i * p + j] = sum;
         }
     }
 }

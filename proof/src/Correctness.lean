@@ -83,7 +83,7 @@ lemma smoothquant_preserves_approx (w : Real) (act_max : Real) (scale : Real) (s
     . have h_beta_pos : (0.85 : Real) > 0 := by norm_num
       have h_qmax_pos : (127.0 : Real) > 0 := by norm_num
       have h_act_max_div_beta_pos : act_max / (0.85 : Real) > 0 := div_pos h_act_max h_beta_pos
-      have h_act_max_div_beta_div_qmax_pos : (act_max / (0.85 : Real)) / (127.0 : Real) > 0 := div_pos h_act_max_div_beta_div_qmax_pos h_qmax_pos
+      have h_act_max_div_beta_div_qmax_pos : (act_max / (0.85 : Real)) / (127.0 : Real) > 0 := div_pos h_act_max_div_beta_pos h_qmax_pos
       exact mul_pos h_scale h_act_max_div_beta_div_qmax_pos
     . exact h_scale -- if sparsity = 0 or act_max = 0, sq_scale = 1.0
 
