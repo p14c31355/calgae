@@ -177,6 +177,7 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
             const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
             output_ptr[i] = @as(u8, @bitCast(@as(i8, @intCast(clamped))));
         }
+        return @intCast(num);
     } else if (bits == 4) {
         var byte_idx: usize = 0;
         for (input, 0..) |val, i| {
@@ -196,7 +197,8 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
         if (num % 2 != 0) {
             byte_idx += 1;
         }
+        return @intCast(byte_idx);
     }
 
-    return 0;
+    return -1; // Should be unreachable
 }

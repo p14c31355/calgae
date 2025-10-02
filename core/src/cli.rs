@@ -13,16 +13,16 @@ pub struct Args {
     )]
     pub prompt: String,
 
-    #[arg(long, default_value = "128")]
+    #[arg(short, long, default_value = "128")]
     pub tokens: usize,
 
     #[arg(short = 't', long, default_value = "0.7")]
     pub temperature: f32,
 
-    #[arg(long, default_value = "50")]
+    #[arg(short, long, default_value = "50")]
     pub top_k: usize,
 
-    #[arg(long, default_value = "0.95")]
+    #[arg(short, long, default_value = "0.95")]
     pub top_p: f32,
 
     #[arg(
