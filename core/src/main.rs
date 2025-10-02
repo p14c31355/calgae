@@ -158,7 +158,7 @@ async fn main() -> AnyhowResult<()> {
             args.execute,
             false, // non-interactive
             quantize_bits,
-            quantize_mode_str,
+            quantize_mode_str.map(String::from),
         )
         .await?;
     }
