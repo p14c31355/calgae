@@ -16,6 +16,8 @@ use std::ffi::CString;
 use std::os::raw::c_char;
 use serde_json::Value;
 use thiserror::Error;
+use std::io::Read;
+use std::fs::File;
 
 use rand::prelude::*;
 
@@ -147,13 +149,21 @@ impl LlmInference {
         }
 
 
-        let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
+        let vb = if let Some(bits) = quantize_bits {
+            // Custom loader for quantized .bin files
+            let mut tensors = std::collections::HashMap::new();
+            for file_path in weights {
+                let tensor_name = file_path.file_stem().ok_or(anyhow!("Invalid file name"))?.to_str().ok_or(anyhow!("Invalid UTF-8 file name"))?.to_string();
+                let dequantized_tensor = Self::load_quantized_tensor(&file_path, bits, &device)?;
+                tensors.insert(tensor_name, dequantized_tensor);
+            }
+            VarBuilder::from_tensors(tensors, dtype, &device)
+        } else {
+            let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
+            unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device) }?
+        };
 
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device) }?;
-
-        // TODO: Implement custom loader for quantized .bin files (i8 tensors)
-        // For now, use safetensors loader; will fail for quantized
-        let model = Arc::new(Llama::load(&mut *vb, &config)?);
+        let model = Arc::new(Llama::load(&mut vb, &config)?);
 
         let eos_token_id = tokenizer.token_to_id("</s>")
             .ok_or_else(|| anyhow!("EOS token '</s>' not found in tokenizer vocab"))? as u32;
@@ -248,85 +258,110 @@ impl LlmInference {
         vocab_size: usize,
         device: &Device,
     ) -> Result<u32> {
-        let mut logits_vec: Vec<f32> = logits.to_dtype(DType::F32)?.flatten_all()?.to_vec1()?;
-        if logits_vec.len() != vocab_size {
-            return Err(anyhow!("Logits size mismatch"));
-        }
+        let logits = logits.to_dtype(DType::F32)?;
+
         if temperature <= 0.0 {
-            let max_idx = logits_vec.iter().enumerate().fold((0, f32::NEG_INFINITY), |acc, (i, &val)| {
-                if val > acc.1 { (i, val) } else { acc }
-            }).0;
-            return Ok(max_idx as u32);
+            let max_idx = logits.argmax(0)?.to_scalar::<u32>()?;
+            return Ok(max_idx);
         }
 
-        // Scale logits
-        for logit in &mut logits_vec {
-            *logit /= temperature;
-        }
+        let logits = logits.div(temperature)?;
 
-        let mut filtered_logits = logits_vec.clone();
+        let probs = candle_nn::ops::softmax(&logits, 0)?;
+
+        let mut filtered_indices: Vec<u32> = (0..vocab_size as u32).collect();
+        let mut filtered_probs = probs.to_vec1::<f32>()?;
 
         // Top-k filtering
         if top_k > 0 && top_k < vocab_size {
-            let mut heap: BinaryHeap<Reverse<(f32, usize)>> = BinaryHeap::new();
-            for (i, &v) in logits_vec.iter().enumerate() {
-                heap.push(Reverse((v, i)));
-                if heap.len() > top_k {
-                    heap.pop();
-                }
-            }
-            let mut top_k_indices: Vec<usize> = heap.into_iter().map(|Reverse((_, i))| i).collect();
-            top_k_indices.sort(); // Optional, for deterministic order
-            let top_k_set: HashSet<usize> = top_k_indices.into_iter().collect();
-            for i in 0..vocab_size {
-                if !top_k_set.contains(&i) {
-                    filtered_logits[i] = f32::NEG_INFINITY;
-                }
+            let (sorted_probs, sorted_indices) = probs.sort_values_with_indices(0, false)?; // descending
+            let sorted_probs_vec = sorted_probs.to_vec1::<f32>()?;
+            let sorted_indices_vec = sorted_indices.to_vec1::<u32>()?;
+
+            filtered_indices.clear();
+            filtered_probs.clear();
+
+            for i in 0..top_k {
+                filtered_indices.push(sorted_indices_vec[i]);
+                filtered_probs.push(sorted_probs_vec[i]);
             }
         }
 
         // Top-p filtering
         if top_p < 1.0 {
-            let max_l = filtered_logits.iter().copied().filter(|f| f.is_finite()).reduce(f32::max).unwrap_or(0.0);
-            let exp_logits: Vec<f32> = filtered_logits.iter().map(|l| (*l - max_l).exp()).collect();
-            let sum_exp = exp_logits.iter().sum::<f32>();
-            let probs: Vec<f32> = exp_logits.iter().map(|e| *e / sum_exp).collect();
-            let mut indexed_probs: Vec<(f32, usize)> = probs.iter().enumerate().map(|(i, &v)| (v, i)).collect();
+            let mut indexed_probs: Vec<(f32, u32)> = filtered_probs.iter().zip(filtered_indices.iter()).map(|(&p, &i)| (p, i)).collect();
             indexed_probs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
+
             let mut cumsum = 0.0;
-            let mut cutoff = 0;
+            let mut cutoff_idx = 0;
             for (prob, _) in indexed_probs.iter() {
                 cumsum += *prob;
-                cutoff += 1;
+                cutoff_idx += 1;
                 if cumsum > top_p {
                     break;
                 }
             }
-            let nucleus_indices: Vec<usize> = indexed_probs[..cutoff].iter().map(|(_, i)| *i).collect();
-            let nucleus_set: HashSet<usize> = nucleus_indices.into_iter().collect();
-            for i in 0..vocab_size {
-                if !nucleus_set.contains(&i) {
-                    filtered_logits[i] = f32::NEG_INFINITY;
+
+            filtered_indices = indexed_probs[..cutoff_idx].iter().map(|(_, i)| *i).collect();
+            filtered_probs = indexed_probs[..cutoff_idx].iter().map(|(p, _)| *p).collect();
+
+            // Re-normalize probabilities after filtering
+            let sum_filtered_probs: f32 = filtered_probs.iter().sum();
+            if sum_filtered_probs > 0.0 {
+                for p in filtered_probs.iter_mut() {
+                    *p /= sum_filtered_probs;
                 }
+            } else {
+                // Fallback if all probabilities are filtered out
+                return Ok(thread_rng().gen_range(0..vocab_size) as u32);
             }
         }
 
-        // Softmax and sample
-        let max_l = filtered_logits.iter().copied().filter(|f| f.is_finite()).reduce(f32::max).unwrap_or(0.0);
-        let exp_logits: Vec<f32> = filtered_logits.iter().map(|l| (*l - max_l).exp()).collect();
-        let sum_exp = exp_logits.iter().sum::<f32>();
-        let probs: Vec<f32> = exp_logits.iter().map(|e| *e / sum_exp).collect();
+        // Sample from filtered and re-normalized probabilities
+        let probs_tensor = Tensor::new(&filtered_probs, device)?;
+        let sample_idx = probs_tensor.multinomial(1, true)?.to_scalar::<u32>()?;
+        Ok(filtered_indices[sample_idx as usize])
+    }
 
-        // Sample
-        let r = thread_rng().gen::<f32>();
-        let mut cum = 0.0;
-        for (i, prob) in probs.iter().enumerate() {
-            cum += prob;
-            if r < cum {
-                return Ok(i as u32);
+    fn load_quantized_tensor(path: &Path, bits: u8, device: &Device) -> Result<Tensor> {
+        let mut file = File::open(path)?;
+        let mut scale_bytes = [0u8; 4];
+        file.read_exact(&mut scale_bytes)?;
+        let scale = f32::from_le_bytes(scale_bytes);
+
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer)?;
+
+        let num_elements = if bits == 4 {
+            buffer.len() * 2
+        } else {
+            buffer.len()
+        };
+
+        let mut dequantized_data = Vec::with_capacity(num_elements);
+
+        if bits == 8 {
+            for &byte in buffer.iter() {
+                let val = (byte as i8) as f32 * scale;
+                dequantized_data.push(val);
             }
+        } else if bits == 4 {
+            for &byte in buffer.iter() {
+                let lower_nibble = (byte & 0x0F);
+                let upper_nibble = ((byte >> 4) & 0x0F);
+
+                // Convert 4-bit unsigned to 4-bit signed, then to f32
+                let val1 = if lower_nibble > 7 { lower_nibble as i8 - 16 } else { lower_nibble as i8 } as f32 * scale;
+                let val2 = if upper_nibble > 7 { upper_nibble as i8 - 16 } else { upper_nibble as i8 } as f32 * scale;
+
+                dequantized_data.push(val1);
+                dequantized_data.push(val2);
+            }
+        } else {
+            return Err(anyhow!("Unsupported quantization bits: {}", bits));
         }
-        Ok((probs.len().saturating_sub(1)) as u32) // fallback
+
+        Tensor::new(&dequantized_data, device)
     }
 }
 

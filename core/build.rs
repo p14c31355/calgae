@@ -6,8 +6,11 @@ fn main() {
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     // Re-enable the Zig build process
+    let target = std::env::var("TARGET").unwrap();
+    let zig_target = target.replace("-unknown", ""); // Remove -unknown for Zig compatibility
+
     let status_zig = std::process::Command::new("zig")
-        .args(&["build", &format!("-Dtarget={}", std::env::var("TARGET").unwrap()), "-Doptimize=ReleaseSafe"])
+        .args(&["build", &format!("-Dtarget={}", zig_target), "-Doptimize=ReleaseSafe"])
         .current_dir("../runtime/zig") // Corrected path to zig build directory
         .status()
         .expect("Failed to build Zig libs");

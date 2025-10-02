@@ -56,20 +56,13 @@ async fn main() -> Result<()> {
 
     match args.command {
         Commands::Prepare => {
-            let codon_handle = tokio::spawn(async {
-                let mut cmd = AsyncCommand::new("codon");
-                cmd.args(["run", "ml/codon/optimize.py", "-o", "models"]);
-                run_command("Codon optimization", &mut cmd).await
-            });
-
             let mojo_handle = tokio::spawn(async {
                 let mut cmd = AsyncCommand::new("mojo");
                 cmd.args(["build", "ml/mojo/kernels.mojo", "-o", "models/kernels"]);
                 run_command("Mojo kernel build", &mut cmd).await
             });
 
-            let (codon, mojo) = join!(codon_handle, mojo_handle);
-            codon??;
+            let (mojo,) = join!(mojo_handle);
             mojo??;
 
             Ok(())
@@ -156,16 +149,6 @@ async fn main() -> Result<()> {
                 println!("Then run 'source ~/.modular/bin/activate' to use.");
             } else {
                 println!("Mojo is available.");
-            }
-
-            // Codon setup
-            println!("Setting up Codon...");
-            let codon_install = AsyncCommand::new("pip3")
-                .args(["install", "codon"])
-                .status()
-                .await?;
-            if !codon_install.success() {
-                eprintln!("Warning: Codon installation failed. Run 'pip3 install codon' manually.");
             }
 
             println!("Setup complete! Source env files as needed.");

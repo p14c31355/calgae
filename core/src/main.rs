@@ -129,10 +129,22 @@ async fn main() -> AnyhowResult<()> {
         return Ok(());
     }
 
-    let quantize_bits = if args.quantize { Some(8) } else { None };
+    let quantize_bits = if args.quantize {
+        Some(
+            match args.quantize_mode.as_str() {
+                "awq" => 4,
+                "smoothquant" => 8,
+                _ => 8, // Default to 8-bit if mode is unknown
+            }
+        )
+    } else {
+        None
+    };
+
+    let quantize_mode_str = if args.quantize { Some(args.quantize_mode.as_str()) } else { None };
 
     if args.interactive {
-        let agent = calgae::Agent::new(args.model.clone(), 0.7, 40, 0.95, quantize_bits, None).await?;
+        let agent = calgae::Agent::new(args.model.clone(), 0.7, 40, 0.95, quantize_bits, quantize_mode_str).await?;
         let agent_arc = Arc::new(agent);
         tui_app(agent_arc, args.tokens, args.execute).await?;
     } else {
@@ -146,7 +158,7 @@ async fn main() -> AnyhowResult<()> {
             args.execute,
             false, // non-interactive
             quantize_bits,
-            None, // no mode needed now
+            quantize_mode_str,
         )
         .await?;
     }
