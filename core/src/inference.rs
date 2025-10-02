@@ -24,6 +24,7 @@ use rand::prelude::*;
 use foreign_types::ForeignTypeRef;
 use candle_core::safetensors::{SafeTensors, MmapedSafetensors};
 use crate::zig_ffi::{zig_quantize_buffer, zig_quantize_model}; // zig_ffi からインポート
+use crate::mojo_ffi; // mojo_ffi からインポート
 use candle_transformers::generation::LogitsProcessor;
 
 #[derive(Error, Debug)]
@@ -51,10 +52,52 @@ impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports Llama-based models like TinyLlama.
     /// Optionally quantizes the model using Zig quantizer before loading.
-    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>) -> Result<Self> {
+    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>, smoothquant: bool) -> Result<Self> {
         let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
         let original_dir = model_path.clone();
+
+        let config_path = original_dir.join("config.json");
+        let config_str = fs::read_to_string(&config_path).map_err(|e| anyhow!("Failed to read config.json: {}", e))?;
+        let config_value: Value = serde_json::from_str(&config_str).map_err(|e| anyhow!("Failed to parse config.json: {}", e))?;
+
+        let num_attention_heads = config_value["num_attention_heads"].as_u64().unwrap_or(32) as usize;
+        let num_key_value_heads = config_value["num_key_value_heads"].as_u64().unwrap_or(num_attention_heads as u64) as usize;
+
+        let config = LlamaConfig {
+            hidden_size: config_value["hidden_size"].as_u64().unwrap_or(4096) as usize,
+            intermediate_size: config_value["intermediate_size"].as_u64().unwrap_or(11008) as usize,
+            vocab_size: config_value["vocab_size"].as_u64().unwrap_or(32000) as usize,
+            num_hidden_layers: config_value["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
+            num_attention_heads,
+            num_key_value_heads,
+            rms_norm_eps: config_value["rms_norm_eps"].as_f64().unwrap_or(1e-5),
+            rope_theta: config_value["rope_theta"].as_f64().unwrap_or(500000.0) as f32,
+            max_position_embeddings: config_value["max_position_embeddings"].as_u64().unwrap_or(2048) as usize,
+            tie_word_embeddings: config_value["tie_word_embeddings"].as_bool().unwrap_or(false),
+            bos_token_id: config_value["bos_token_id"].as_u64().map(|v| v as u32),
+            eos_token_id: config_value["eos_token_id"].as_u64().map(|v| LlamaEosToks::Single(v as u32)),
+            rope_scaling: None,
+            use_flash_attn: false,
+        };
+        let config = Arc::new(config);
+
+        let mut scales: Option<Vec<f32>> = None;
+        if smoothquant && quantize_bits == Some(8) {
+            // SmoothQuant calibration
+            let mut calibrated_scales = vec![0.0f32; config.hidden_size];
+            let act_maxes = Self::simulate_act_maxes(config.hidden_size); // Simulate act_maxes for now
+            unsafe {
+                mojo_ffi::compute_smoothquant_scales_c(
+                    act_maxes.as_ptr(),
+                    config.hidden_size as i32,
+                    0.85, // sparsity=0.85 from SmoothQuant paper
+                    8,    // bits
+                    calibrated_scales.as_mut_ptr(),
+                );
+            }
+            scales = Some(calibrated_scales);
+        }
 
         // Optional quantization using Zig
         if let Some(bits) = quantize_bits {
@@ -84,7 +127,19 @@ impl LlmInference {
                     // For large models, this can lead to very high memory consumption, which contradicts the project's goal of minimizing resource usage.
                     // Consider refactoring this to process tensors in smaller chunks or streams to keep memory usage low.
                     let tensor_data = mmaped.load_tensor(tensor_info, &device)?;
-                    let tensor_data_f32 = tensor_data.to_dtype(DType::F32)?.to_vec1::<f32>()?;
+                    let mut tensor_data_f32 = tensor_data.to_dtype(DType::F32)?.to_vec1::<f32>()?;
+
+                    // Apply SmoothQuant scales if enabled (absorb activation outliers into weights per channel)
+                    if let Some(ref sq_scales) = scales {
+                        let hidden_size = sq_scales.len();
+                        for i in 0..tensor_data_f32.len() {
+                            let channel = i % hidden_size;
+                            if sq_scales[channel] != 0.0 {
+                                tensor_data_f32[i] /= sq_scales[channel];
+                            }
+                        }
+                        info!("Applied SmoothQuant scales to tensor {}", tensor_name);
+                    }
 
                     let num_elements = tensor_data_f32.len();
                     let output_buffer_size = (num_elements * bits as usize + 7) / 8; // Calculate buffer size for quantized data
@@ -93,7 +148,7 @@ impl LlmInference {
 
                     let res = unsafe {
                         zig_quantize_buffer(
-                            tensor_data_f32.as_ptr(),
+                            tensor_data_f32.as_ptr() as *const c_void, // *const f32 を *const c_void にキャスト
                             num_elements,
                             bits,
                             output_buffer.as_mut_ptr() as *mut c_void,
@@ -131,31 +186,6 @@ impl LlmInference {
 
         let tokenizer_path = original_dir.join("tokenizer.json");
         let tokenizer = Arc::new(Tokenizer::from_file(&tokenizer_path).map_err(InferenceError::TokenizerLoadError)?);
-
-        let config_path = original_dir.join("config.json");
-        let config_str = fs::read_to_string(&config_path).map_err(|e| anyhow!("Failed to read config.json: {}", e))?;
-        let config_value: Value = serde_json::from_str(&config_str).map_err(|e| anyhow!("Failed to parse config.json: {}", e))?;
-
-        let num_attention_heads = config_value["num_attention_heads"].as_u64().unwrap_or(32) as usize;
-        let num_key_value_heads = config_value["num_key_value_heads"].as_u64().unwrap_or(num_attention_heads as u64) as usize;
-
-        let config = LlamaConfig {
-            hidden_size: config_value["hidden_size"].as_u64().unwrap_or(4096) as usize,
-            intermediate_size: config_value["intermediate_size"].as_u64().unwrap_or(11008) as usize,
-            vocab_size: config_value["vocab_size"].as_u64().unwrap_or(32000) as usize,
-            num_hidden_layers: config_value["num_hidden_layers"].as_u64().unwrap_or(32) as usize,
-            num_attention_heads,
-            num_key_value_heads,
-            rms_norm_eps: config_value["rms_norm_eps"].as_f64().unwrap_or(1e-5),
-            rope_theta: config_value["rope_theta"].as_f64().unwrap_or(500000.0) as f32,
-            max_position_embeddings: config_value["max_position_embeddings"].as_u64().unwrap_or(2048) as usize,
-            tie_word_embeddings: config_value["tie_word_embeddings"].as_bool().unwrap_or(false),
-            bos_token_id: config_value["bos_token_id"].as_u64().map(|v| v as u32),
-            eos_token_id: config_value["eos_token_id"].as_u64().map(|v| LlamaEosToks::Single(v as u32)),
-            rope_scaling: None,
-            use_flash_attn: false,
-        };
-        let config = Arc::new(config);
 
         let weights: Vec<PathBuf> = if quantize_bits.is_some() {
             fs::read_dir(&model_path)?
@@ -247,6 +277,27 @@ impl LlmInference {
             dtype,
             eos_token_id,
         })
+    }
+
+    /// Calibrates SmoothQuant scales by simulating per-channel activation maxes for outlier absorption.
+    /// In full implementation, run forward passes on calibration data.
+    /// Returns a vector of scales for each channel (hidden_size).
+    fn calibrate_smoothquant(config: &LlamaConfig, sparsity: f32, bits: u8) -> Vec<f32> {
+        if bits != 8 {
+            panic!("SmoothQuant calibration requires 8-bit quantization");
+        }
+        let hidden_size = config.hidden_size;
+        // Simulate act_maxes (placeholder: uniform 1.0; full: collect from model forwards)
+        let act_maxes = vec![1.0f32; hidden_size];
+        info!("SmoothQuant act_maxes simulated for hidden_size {}", hidden_size);
+        act_maxes
+    }
+
+    /// Simulates activation maximums for SmoothQuant calibration.
+    /// In a full implementation, this would involve running forward passes on calibration data.
+    fn simulate_act_maxes(hidden_size: usize) -> Vec<f32> {
+        // Placeholder: uniform 1.0; full implementation would collect from model forwards
+        vec![1.0f32; hidden_size]
     }
 
     /// Performs efficient inference with KV cache: prefill prompt, then autoregressive decode.

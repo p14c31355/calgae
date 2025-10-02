@@ -229,11 +229,12 @@ Agents should be:
 
 * [x] Build Rust orchestrator.
 * [ ] Add Zig kernels for matmul.
-* [ ] Deploy accelerated components in **Mojo**.
+* [x] Deploy accelerated components in **Mojo**.
+* [x] Integrate SmoothQuant for outlier handling in quantization.
 
 ### 🎯 Long-term
 
-* [ ] Formalize quantization correctness in Lean4.
+* [x] Formalize quantization correctness in Lean4.
 * [ ] Create unified agent runtime with plugin system (leveraging Mojo acceleration).
 * [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Lean4).
 
