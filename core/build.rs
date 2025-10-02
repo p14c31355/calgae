@@ -7,7 +7,7 @@ fn main() {
 
     // Re-enable the Zig build process
     let status_zig = std::process::Command::new("zig")
-        .args(&["build", "-Dtarget=x86_64-linux-gnu", "-Doptimize=ReleaseSafe"])
+        .args(&["build", &format!("-Dtarget={}", std::env::var("TARGET").unwrap()), "-Doptimize=ReleaseSafe"])
         .current_dir("../runtime/zig") // Corrected path to zig build directory
         .status()
         .expect("Failed to build Zig libs");
