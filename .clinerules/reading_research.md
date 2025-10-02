@@ -17,6 +17,12 @@
 - [Pushing the Limits of Large Language Model Quantization](https://arxiv.org/abs/2411.17525)  
   Exploration of quantization lower bounds and practical limits.
 
+- [Highly Optimized Kernels and Fine-Grained Codebooks for LLM Inference on CPU](https://arxiv.org/abs/2501.00032)  
+  Optimized kernels for 4-bit group-wise quantization, improving prefill/decode throughput by 3x or more. Practical implementation-focused paper to maximize CPU potential.
+
+- [SAIL: SRAM-Accelerated LLM Inference System with Lookup-Table Quantization](https://arxiv.org/abs/2509.25853)  
+  Accelerates arbitrary-bit quantization on CPU using SRAM for lookup tables. Hardware-oriented approach evolving in-register lookups from NoMAD-Attention (2403.01273).
+
 ---
 
 ## Foundational Techniques
@@ -33,6 +39,9 @@
 - [GuidedQuant: Large Language Model Quantization via Exploiting Gradient Information](https://arxiv.org/abs/2505.07004)  
   Uses gradient information to guide quantization, improving accuracy.
 
+- [A Systems Approach to Advancing Low-Bit LLM Quantization](https://arxiv.org/abs/2412.20185)  
+  System-wide approach to low-bit quantization, improving quality via CPU memory utilization. Updates challenge analysis from 2403.06408 with 2025 state-of-the-art limits.
+
 ---
 
 ## CPU-centric Optimizations
@@ -45,6 +54,12 @@
 
 - [On-Device Qwen2.5: Efficient LLM Inference on Embedded / Edge](https://arxiv.org/abs/2504.17376)  
   Design strategies for running LLMs on CPU and edge devices.
+
+- [T-MAC: CPU Renaissance via Table Lookup for Low-Bit LLM Inference](https://arxiv.org/abs/2407.00088)  
+  LUT-based inference for low-bit (2-4bit) LLMs dramatically improves CPU efficiency. Complements on-device comparisons in 2505.06461 with concrete lookup implementations.
+
+- [Characterizing and Optimizing LLM Inference Workloads on CPU-GPU Systems](https://arxiv.org/abs/2504.11750)  
+  Analysis and optimization of LLM inference on CPU-GPU hybrid systems. Deepens prefill-decode separation from 2507.18454 with real-system perspectives like PCIe/GH200.
 
 ---
 
