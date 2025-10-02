@@ -72,7 +72,7 @@ def smoothquant_scale (act_max : Real) (sparsity : Real) (beta : Real := 0.85) (
   if sparsity > 0 ∧ act_max > 0 then (act_max / beta) / qmax else 1.0
 
 -- Lemma: SmoothQuant scale application preserves quantization approximation
-lemma smoothquant_preserves_approx (w : Real) (act_max : Real) (scale : Real) (sparsity : Real) (q : Int4) (h_scale : scale > 0) (h_range : -8.5 ≤ w / scale ∧ w / scale ≤ 7.5)
+lemma smoothquant_preserves_approx (w : Real) (act_max : Real) (scale : Real) (sparsity : Real) (h_scale : scale > 0) (h_range : -8.5 ≤ w / scale ∧ w / scale ≤ 7.5)
   (h_act_max : act_max > 0) : -- Add assumption for act_max > 0
   let sq_scale := smoothquant_scale act_max sparsity
   let new_scale := scale * sq_scale

@@ -10,7 +10,7 @@ use candle_transformers::models::llama::{Config as LlamaConfig, Llama, Cache, Ll
 use tokenizers::Tokenizer;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use log::{info, error};
+use log::{info, error, warn};
 use std::fs;
 use std::ffi::CString;
 use std::os::raw::c_char;
@@ -126,12 +126,22 @@ impl LlmInference {
 
                     // Apply SmoothQuant scales if enabled (absorb activation outliers into weights per channel)
                     if let Some(ref sq_scales) = scales {
-                        let hidden_size = sq_scales.len();
-                        // Heuristic: Apply scales only to tensors where the last dimension matches hidden_size.
-                        if tensor_data.dims().last() == Some(&hidden_size) {
+                        // Apply scales only to specific linear layers' weights for which activations were calibrated.
+                        const TENSORS_TO_SCALE: &[&str] = &[
+                            "q_proj.weight", "k_proj.weight", "v_proj.weight",
+                            "gate_proj.weight", "up_proj.weight"
+                        ];
+
+                        if TENSORS_TO_SCALE.iter().any(|&s| tensor_name.ends_with(s)) {
+                            let hidden_size = sq_scales.len();
+                            // As a sanity check, ensure the last dimension matches.
+                            if tensor_data.dims().last() != Some(&hidden_size) {
+                                warn!("Tensor {} is being scaled but its last dimension does not match hidden_size.", tensor_name);
+                            }
+
                             for i in 0..tensor_data_f32.len() {
                                 let channel = i % hidden_size;
-                                if sq_scales[channel] != 0.0 {
+                                if sq_scales[channel] > 0.0 {
                                     tensor_data_f32[i] /= sq_scales[channel];
                                 }
                             }

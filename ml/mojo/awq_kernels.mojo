@@ -100,6 +100,12 @@ fn compute_scale_c(
 
     return 0
 
+# Helper to swap elements in an UnsafePointer
+fn swap(data: UnsafePointer[Float32], i: Int, j: Int):
+    var temp : Float32 = data.load(i)
+    data.store(i, data.load(j))
+    data.store(j, temp)
+
 # QuickSort implementation for UnsafePointer[Float32] (descending order)
 fn quicksort_descending(data: UnsafePointer[Float32], low: Int, high: Int):
     if low < high:
@@ -108,12 +114,8 @@ fn quicksort_descending(data: UnsafePointer[Float32], low: Int, high: Int):
         for j in range(low, high):
             if data.load(j) >= pivot_val: # Descending order
                 i += 1
-                var temp = data.load(i)
-                data.store(i, data.load(j))
-                data.store(j, temp)
-        var temp = data.load(i + 1)
-        data.store(i + 1, data.load(high))
-        data.store(high, temp)
+                swap(data, i, j)
+        swap(data, i + 1, high)
         var pivot_idx = i + 1
 
         quicksort_descending(data, low, pivot_idx - 1)
