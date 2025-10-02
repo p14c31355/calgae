@@ -95,7 +95,7 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
                                     let cmd = response[cmd_start..cmd_start + cmd_end].trim().to_string();
                                     if !cmd.is_empty() {
                                         println!("Executing suggested command: {}", cmd);
-                                        std::process::Command::new("sh").arg("-c").arg(&cmd).status()?;
+                                        tokio::process::Command::new("sh").arg("-c").arg(&cmd).status().await?;
                                     }
                                 }
                             }
