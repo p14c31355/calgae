@@ -1,7 +1,7 @@
 # `AGENT.md`
 
 > **Project Goal**
-> Build a **lightweight, safe, high-speed LLM runtime and model stack** using modern safe systems languages (Mojo, Codon, Zig, Lean4, Rust).
+> Build a **lightweight, safe, high-speed LLM runtime and model stack** using modern safe systems languages (Mojo, Zig, Lean4, Rust).
 > Prioritize: **minimum compute resource usage**, **quantization + distillation**, **portable runtimes (native, specialized backends)**, and **formal verification of correctness (Lean4)**.
 
 ---
@@ -17,18 +17,6 @@
   * Combines **Python's usability** with **C's performance**.
   * Excellent for **AI/ML acceleration** and vector-heavy operations.
   * Designed for **hardware-native performance** on specialized accelerators.
-
----
-
-### ⚡ Codon
-
-* Official: [https://codon.com](https://codon.com)
-* GitHub: [https://github.com/exaloop/codon](https://github.com/exaloop/codon)
-* Key points:
-
-  * High-performance, **compiled Python dialect**.
-  * Focus on generating **highly optimized native code**.
-  * Suitable for creating **minimal, fast LLM inference binaries**.
 
 ---
 
@@ -152,10 +140,9 @@
 
   * Repo: [https://github.com/tracel-ai/burn](https://github.com/tracel-ai/burn)
 
-### High-Performance Python Backends
+### High-Performance Backends (Mojo)
 
 * **Mojo** for accelerated inference kernels.
-* **Codon** for highly optimized, self-contained native execution.
 
 ---
 
@@ -187,11 +174,11 @@
 * Experiment with **Any-precision scheduling**.
 * Apply **LoRA / QLoRA** finetunes for specific tasks.
 * Add Zig kernels for **SIMD-heavy ops**.
-* Port critical, performance-sensitive logic to **Mojo or Codon** for native speed.
+* Port critical, performance-sensitive logic to **Mojo** for native speed.
 
 ### Phase C: Runtime Engineering
 
-* Build high-speed inference/pre/post-processing components in **Mojo/Codon**.
+* Build high-speed inference/pre/post-processing components in **Mojo**.
 * Formalize + verify quantization correctness in **Lean4**.
 * Build **Rust orchestrator** (agent system, I/O pipelines).
 
@@ -205,7 +192,7 @@
 Agents should be:
 
 * Event-driven (Rust async).
-* Extensible with **Mojo/Codon** for specialized, accelerated components.
+* Extensible with **Mojo** for specialized, accelerated components.
 * Verifiable logic (Lean4 proofs).
 
 ---
@@ -237,38 +224,18 @@ Agents should be:
 * [x] Quantize small model with AWQ.
 * [x] Run inference in llama.cpp.
 * [x] Benchmark with EdgeProfiler.
-<<<<<<< HEAD
-=======
-* [x] Quantize small model with AWQ.
-* [x] Run inference in llama.cpp.
-* [x] Benchmark with EdgeProfiler.
->>>>>>> develop
 
 ### 🔜 Mid-term
 
 * [x] Build Rust orchestrator.
-<<<<<<< HEAD
-=======
-* [x] Build Rust orchestrator.
->>>>>>> develop
 * [ ] Add Zig kernels for matmul.
-* [ ] Deploy accelerated components in **Mojo/Codon**.
+* [ ] Deploy accelerated components in **Mojo**.
 
 ### 🎯 Long-term
 
-<<<<<<< HEAD
-* [x] Formalize quantization correctness in Lean4.
-* [x] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
-=======
-<<<<<<< HEAD
-* [x] Formalize quantization correctness in Lean4.
-* [x] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
-=======
 * [ ] Formalize quantization correctness in Lean4.
-* [ ] Create unified agent runtime with plugin system (leveraging Mojo/Codon acceleration).
->>>>>>> aca3ede (Adjustment docs)
->>>>>>> develop
-* [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Codon + Lean4).
+* [ ] Create unified agent runtime with plugin system (leveraging Mojo acceleration).
+* [ ] Publish `light-llm-agent` stack (Rust + Zig + Mojo + Lean4).
 
 ---
 
@@ -276,7 +243,7 @@ Agents should be:
 
 This project combines:
 
-* **Mojo/Codon** → performance acceleration, hardware-native execution.
+* **Mojo** → performance acceleration, hardware-native execution.
 * **Zig** → bare-metal performance for core kernels.
 * **Lean4** → formal proofs of correctness.
 * **Rust** → ecosystem glue + async agent orchestration.

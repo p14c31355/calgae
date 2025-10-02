@@ -10,10 +10,21 @@ use candle_transformers::models::llama::{Config as LlamaConfig, Llama, Cache, Ll
 use tokenizers::Tokenizer;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use log::info;
+use log::{info, error};
 use std::fs;
+use std::ffi::CString;
+use std::os::raw::c_char;
 use serde_json::Value;
 use thiserror::Error;
+use std::io::Read;
+use std::fs::File;
+
+use rand::prelude::*;
+
+use foreign_types::ForeignTypeRef;
+use candle_core::safetensors::{SafeTensors, MmapedSafetensors};
+use crate::zig_ffi::{zig_quantize_buffer, zig_quantize_model}; // zig_ffi からインポート
+use candle_transformers::generation::LogitsProcessor;
 
 #[derive(Error, Debug)]
 pub enum InferenceError {
@@ -32,24 +43,96 @@ pub struct LlmInference {
     tokenizer: Arc<Tokenizer>,
     config: Arc<LlamaConfig>,
     device: Device,
+    dtype: DType,
     eos_token_id: u32,
 }
 
 impl LlmInference {
     /// Creates a new inference instance from a model directory containing safetensors files and tokenizer.json.
     /// Supports Llama-based models like TinyLlama.
-    pub fn new(model_path: PathBuf, dtype: Option<DType>) -> Result<Self> {
-        let dtype = dtype.unwrap_or(DType::F32);
+    /// Optionally quantizes the model using Zig quantizer before loading.
+    pub fn new(model_path: PathBuf, dtype: Option<DType>, quantize_bits: Option<u8>) -> Result<Self> {
+        let dtype = dtype.unwrap_or(DType::F16);
         let device = Device::Cpu;
+        let original_dir = model_path.clone();
+
+        // Optional quantization using Zig
+        if let Some(bits) = quantize_bits {
+            let safetensors_files: Vec<PathBuf> = fs::read_dir(&model_path)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
+                .map(|e| e.path())
+                .collect();
+            if safetensors_files.is_empty() {
+                return Err(anyhow!("No safetensors files found in model directory"));
+            }
+
+            let quantized_dir = model_path.join(format!("quantized_{}", bits));
+            fs::create_dir_all(&quantized_dir)?;
+
+            for file in safetensors_files {
+                info!("Quantizing file: {}", file.display());
+                let mmaped = unsafe { MmapedSafetensors::new(&file)? };
+                let tensors = mmaped.tensors();
+
+                let file_name = file.file_name().ok_or(anyhow!("Invalid file name"))?.to_str().ok_or(anyhow!("Invalid UTF-8 file name"))?;
+                let quantized_output_path = quantized_dir.join(format!("{}_{}.bin", file_name.strip_suffix(".safetensors").unwrap_or(file_name), bits));
+                let mut output_file = File::create(&quantized_output_path)?;
+
+                for (tensor_name, tensor_info) in tensors.iter() {
+                    // This implementation loads the entire tensor into memory as a Vec<f32> before quantization.
+                    // For large models, this can lead to very high memory consumption, which contradicts the project's goal of minimizing resource usage.
+                    // Consider refactoring this to process tensors in smaller chunks or streams to keep memory usage low.
+                    let tensor_data = mmaped.load_tensor(tensor_info, &device)?;
+                    let tensor_data_f32 = tensor_data.to_dtype(DType::F32)?.to_vec1::<f32>()?;
+
+                    let num_elements = tensor_data_f32.len();
+                    let output_buffer_size = (num_elements * bits as usize + 7) / 8; // Calculate buffer size for quantized data
+                    let mut output_buffer = vec![0u8; output_buffer_size];
+                    let mut scale: f32 = 0.0;
+
+                    let res = unsafe {
+                        zig_quantize_buffer(
+                            tensor_data_f32.as_ptr(),
+                            num_elements,
+                            bits,
+                            output_buffer.as_mut_ptr() as *mut c_void,
+                            &mut scale as *mut f32,
+                        )
+                    };
+
+                    if res < 0 {
+                        error!("Zig quantization failed for tensor {} in file {}", tensor_name, file.display());
+                        return Err(anyhow!("Zig quantization failed for tensor {}", tensor_name));
+                    } else {
+                        // Write tensor name length, name, scale, shape length, shape, data length, and quantized data to the output file
+                        let data_len = res as usize;
+                        let shape = tensor_data.shape().dims();
+                        output_file.write_all(&(tensor_name.len() as u32).to_le_bytes())?;
+                        output_file.write_all(tensor_name.as_bytes())?;
+                        output_file.write_all(&scale.to_le_bytes())?;
+                        output_file.write_all(&(shape.len() as u32).to_le_bytes())?; // Shape length
+                        for &dim in shape.iter() {
+                            output_file.write_all(&(dim as u64).to_le_bytes())?; // Each dimension
+                        }
+                        output_file.write_all(&(data_len as u64).to_le_bytes())?;
+                        output_file.write_all(&output_buffer[..data_len])?;
+                        info!("Tensor {} quantized to {} bits, scale: {}", tensor_name, bits, scale);
+                    }
+                }
+                info!("File {} quantized to {} bits at {}", file.display(), bits, quantized_output_path.display());
+            }
+            model_path = quantized_dir; // Use quantized directory
+        }
 
         if !device.is_cuda() {
             info!("Warning: CUDA is not available, this example runs on CPU");
         }
 
-        let tokenizer_path = model_path.join("tokenizer.json");
+        let tokenizer_path = original_dir.join("tokenizer.json");
         let tokenizer = Arc::new(Tokenizer::from_file(&tokenizer_path).map_err(InferenceError::TokenizerLoadError)?);
 
-        let config_path = model_path.join("config.json");
+        let config_path = original_dir.join("config.json");
         let config_str = fs::read_to_string(&config_path).map_err(|e| anyhow!("Failed to read config.json: {}", e))?;
         let config_value: Value = serde_json::from_str(&config_str).map_err(|e| anyhow!("Failed to parse config.json: {}", e))?;
 
@@ -74,18 +157,79 @@ impl LlmInference {
         };
         let config = Arc::new(config);
 
-        let weights: Vec<PathBuf> = fs::read_dir(&model_path)?
-            .filter_map(Result::ok)
-            .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
-            .map(|e| e.path())
-            .collect();
+        let weights: Vec<PathBuf> = if quantize_bits.is_some() {
+            fs::read_dir(&model_path)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "bin"))
+                .map(|e| e.path())
+                .collect()
+        } else {
+            fs::read_dir(&original_dir)?
+                .filter_map(Result::ok)
+                .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
+                .map(|e| e.path())
+                .collect()
+        };
         if weights.is_empty() {
-            return Err(anyhow::anyhow!("No safetensors files found"));
+            return Err(anyhow::anyhow!(if quantize_bits.is_some() { "No quantized bin files found" } else { "No safetensors files found" }));
         }
 
 
-        let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
-        let vb = unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device)? };
+        let mut vb = if let Some(bits) = quantize_bits {
+            // Custom loader for quantized .bin files
+            let mut tensors = std::collections::HashMap::new();
+            for file_path in weights {
+                let mut file = File::open(&file_path)?;
+                loop {
+                    let mut name_len_bytes = [0u8; 4];
+                    match file.read_exact(&mut name_len_bytes) {
+                        Ok(()) => {
+                            let name_len = u32::from_le_bytes(name_len_bytes) as usize;
+                            let mut name_bytes = vec![0u8; name_len];
+                            file.read_exact(&mut name_bytes)?;
+                            let tensor_name = String::from_utf8(name_bytes)?;
+
+                            let mut scale_bytes = [0u8; 4];
+                            file.read_exact(&mut scale_bytes)?;
+                            let scale = f32::from_le_bytes(scale_bytes);
+
+                            // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
+                            // For now, assuming the rest of the file is quantized data for this tensor
+                            let mut shape_len_bytes = [0u8; 4];
+                            file.read_exact(&mut shape_len_bytes)?;
+                            let shape_len = u32::from_le_bytes(shape_len_bytes) as usize;
+                            let mut shape = Vec::with_capacity(shape_len);
+                            for _ in 0..shape_len {
+                                let mut dim_bytes = [0u8; 8];
+                                file.read_exact(&mut dim_bytes)?;
+                                shape.push(u64::from_le_bytes(dim_bytes) as usize);
+                            }
+
+                            let mut data_len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                            file.read_exact(&mut data_len_bytes)?;
+                            let data_len = u64::from_le_bytes(data_len_bytes) as usize;
+                            let mut quantized_data_buffer = vec![0; data_len];
+                            file.read_exact(&mut quantized_data_buffer)?;
+
+                            let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device, &shape)?;
+                            tensors.insert(tensor_name, dequantized_tensor);
+                        }
+                        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                            // End of file reached, break loop
+                            break;
+                        }
+                        Err(e) => {
+                            // Propagate other errors
+                            return Err(e.into());
+                        }
+                    }
+                }
+            }
+            VarBuilder::from_tensors(tensors, dtype, &device)
+        } else {
+            let weights_ref: Vec<&Path> = weights.iter().map(|p| p.as_path()).collect();
+            unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device) }?
+        };
 
         let model = Arc::new(Llama::load(vb, &config)?);
 
@@ -100,6 +244,7 @@ impl LlmInference {
             tokenizer,
             config,
             device,
+            dtype,
             eos_token_id,
         })
     }
@@ -114,6 +259,7 @@ impl LlmInference {
         top_k: usize,
         top_p: f32,
     ) -> Result<String> {
+        let start = std::time::Instant::now();
         let encoding = self.tokenizer.encode(prompt, true)
             .map_err(|e| anyhow!("Tokenizer encode error: {}", e))?;
         let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
@@ -123,20 +269,26 @@ impl LlmInference {
             return Err(InferenceError::NoOutputError.into());
         }
 
-        let mut cache = Cache::new(true, DType::F32, &self.config, &self.device)?;
+        let mut cache = Cache::new(true, self.dtype, &self.config, &self.device)?; // Use model's dtype
         let input = Tensor::new(tokens.as_slice(), &self.device)?.unsqueeze(0)?;
         let logits = self.model.forward(&input, 0, &mut cache)?;
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
 
         let mut generated_tokens = vec![];
+        let mut logits_processor = LogitsProcessor::new(0, Some(temperature), Some(top_p)); // seed は適当な値 (0) を設定
+        if top_k > 0 {
+            logits_processor.top_k = Some(top_k);
+        }
+
         let last_pos = Tensor::new(&[(prompt_len - 1) as i64], &self.device)?;
-        let next_token_logits = logits.index_select(&last_pos, 0usize)?;
-        let next_token = next_token_logits.argmax(1)?.to_scalar::<u32>()?;
+        let next_token_logits = logits.index_select(&last_pos, 0usize)?.squeeze(0)?.to_dtype(DType::F32)?;
+        let next_token = logits_processor.sample(&next_token_logits)?;
         generated_tokens.push(next_token);
         tokens.push(next_token);
 
         if next_token == self.eos_token_id {
             let generated_str = self.tokenizer.decode(&generated_tokens, false).map_err(|e| anyhow!("Decode error: {}", e))?;
+            println!("Inference time: {:?} for EOS early stop", start.elapsed());
             return Ok(generated_str.trim().to_string());
         }
 
@@ -148,7 +300,7 @@ impl LlmInference {
             let logits = self.model.forward(&input, position, &mut cache)?;
             let next_token_logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
 
-            let next_token = next_token_logits.argmax(0)?.to_scalar::<u32>()?;
+            let next_token = logits_processor.sample(&next_token_logits)?;
             generated_tokens.push(next_token);
             tokens.push(next_token);
             position += 1;
@@ -165,8 +317,39 @@ impl LlmInference {
         if response.is_empty() {
             return Err(InferenceError::NoOutputError.into());
         }
+        println!("Inference time: {:?}", start.elapsed());
 
         Ok(response)
+    }
+
+    fn load_quantized_tensor_from_buffer(buffer: &[u8], bits: u8, scale: f32, device: &Device, shape: &[usize]) -> Result<Tensor> {
+        let num_elements: usize = shape.iter().product();
+        let mut dequantized_data = Vec::with_capacity(num_elements);
+
+        if bits == 8 {
+            for &byte in buffer.iter() {
+                let val = (byte as i8) as f32 * scale;
+                dequantized_data.push(val);
+            }
+        } else if bits == 4 {
+            for &byte in buffer.iter() {
+                let lower_nibble = byte & 0x0F;
+                let upper_nibble = (byte >> 4) & 0x0F;
+
+                // Convert 4-bit unsigned to 4-bit signed, then to f32
+                let val1 = if lower_nibble > 7 { lower_nibble as i8 - 16 } else { lower_nibble as i8 } as f32 * scale;
+                dequantized_data.push(val1);
+
+                if dequantized_data.len() < num_elements {
+                    let val2 = if upper_nibble > 7 { upper_nibble as i8 - 16 } else { upper_nibble as i8 } as f32 * scale;
+                    dequantized_data.push(val2);
+                }
+            }
+        } else {
+            return Err(anyhow!("Unsupported quantization bits: {}", bits));
+        }
+
+        Tensor::new(&dequantized_data, device)?.reshape(shape)
     }
 }
 

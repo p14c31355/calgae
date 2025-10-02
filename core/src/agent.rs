@@ -1,5 +1,6 @@
 use super::inference::LlmInference;
 use once_cell::sync::Lazy;
+use log::warn;
 use regex::Regex;
 
 use anyhow::Result as AnyhowResult;
@@ -43,8 +44,31 @@ pub struct Agent {
 }
 
 impl Agent {
-    pub async fn new(model: std::path::PathBuf, temperature: f32, top_k: usize, top_p: f32) -> AnyhowResult<Self> {
-        let inference = Arc::new(LlmInference::new(model, None)?);
+    pub async fn new(
+        model: std::path::PathBuf, 
+        temperature: f32, 
+        top_k: usize, 
+        top_p: f32,
+        quantize_bits: Option<u8>,
+        quantize_mode: Option<&str>
+    ) -> AnyhowResult<Self> {
+        let bits = match quantize_mode {
+            Some("awq") => {
+                if quantize_bits != Some(4) {
+                    warn!("AWQ mode requires 4-bit quantization. Overriding.");
+                }
+                Some(4)
+            }
+            Some("smoothquant") => {
+                if quantize_bits != Some(8) {
+                    warn!("SmoothQuant mode requires 8-bit quantization. Overriding.");
+                }
+                Some(8)
+            }
+            _ => quantize_bits,
+        };
+
+        let inference = Arc::new(LlmInference::new(model, None, bits)?);
         Ok(Agent { inference, temperature, top_k, top_p })
     }
 
@@ -258,8 +282,10 @@ pub async fn run_agent(
     top_p: f32,
     execute: bool,
     interactive: bool,
+    quantize_bits: Option<u8>,
+    quantize_mode: Option<String>,
 ) -> AnyhowResult<()> {
-    let agent = Agent::new(model, temperature, top_k, top_p).await?;
+    let agent = Agent::new(model, temperature, top_k, top_p, quantize_bits, quantize_mode.as_deref()).await?;
 
     if interactive {
         run_interactive_loop(&agent, tokens, execute);

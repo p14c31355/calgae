@@ -1,0 +1,50 @@
+const std = @import("std");
+
+pub fn build(b: *std.Build) void {
+    const optimize = b.standardOptimizeOption(.{});
+    const target = b.standardTargetOptions(.{});
+
+
+    // Core runtime library
+    const runtime_module = b.createModule(.{
+        .root_source_file = b.path("src/runtime.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const lib_runtime = b.addLibrary(.{
+        .name = "runtime",
+        .root_module = runtime_module,
+    });
+    lib_runtime.linkLibC();
+    b.installArtifact(lib_runtime);
+
+    // Quantizer library
+    const quantizer_module = b.createModule(.{
+        .root_source_file = b.path("src/quantizer.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const lib_quantizer = b.addLibrary(.{
+        .name = "quantizer",
+        .root_module = quantizer_module,
+    });
+    lib_quantizer.linkLibC();
+    b.installArtifact(lib_quantizer);
+
+    // Test executable for quantizer
+    const test_module = b.addModule("test", .{
+        .root_source_file = b.path("test.c"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const test_exe = b.addExecutable(.{
+        .name = "test_quantizer",
+        .root_module = test_module,
+    });
+    test_exe.addIncludePath(b.path("src"));
+    test_exe.linkLibC();
+    test_exe.linkLibrary(lib_quantizer);
+    test_exe.linkLibrary(lib_runtime);
+    b.installArtifact(test_exe);
+
+}

@@ -3,6 +3,7 @@ use clap::{Parser, Subcommand};
 use std::fs;
 use std::path::Path;
 use tokio::join;
+use tokio::process::Command;
 use tokio::process::Command as AsyncCommand;
 
 #[derive(Parser)]
@@ -38,59 +39,31 @@ async fn is_command_available(cmd: &str) -> Result<bool> {
     Ok(output.status.success())
 }
 
+async fn run_command(name: &str, cmd: &mut Command) -> Result<()> {
+    println!("Running: {}...", name);
+    let status = cmd.status().await?;
+    if status.success() {
+        println!("Success: {} completed.", name);
+        Ok(())
+    } else {
+        anyhow::bail!("Failed: {} exited with status {}", name, status);
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
     match args.command {
         Commands::Prepare => {
-            println!("Preparing artifacts (Codon, Mojo)...");
-
-            let codon_handle = tokio::spawn(async {
-                println!("Running Codon optimization...");
-                let status = AsyncCommand::new("codon")
-                    .args(["run", "ml/codon/optimize.py", "-o", "models"])
-                    .status()
-                    .await;
-                if let Ok(s) = status {
-                    if s.success() {
-                        println!("Codon optimization completed.");
-                    } else {
-                        eprintln!("Warning: Codon optimization failed.");
-                    }
-                } else {
-                    eprintln!("Failed to run Codon optimization.");
-                }
-                status
-            });
-
             let mojo_handle = tokio::spawn(async {
-                println!("Building Mojo kernels...");
-                let status = AsyncCommand::new("mojo")
-                    .args(["build", "ml/mojo/kernels.mojo", "-o", "models/kernels"])
-                    .status()
-                    .await;
-                if let Ok(s) = status {
-                    if s.success() {
-                        println!("Mojo build completed.");
-                    } else {
-                        eprintln!("Warning: Mojo build failed.");
-                    }
-                } else {
-                    eprintln!("Failed to run Mojo build.");
-                }
-                status
+                let mut cmd = AsyncCommand::new("mojo");
+                cmd.args(["build", "ml/mojo/kernels.mojo", "-o", "models/kernels"]);
+                run_command("Mojo kernel build", &mut cmd).await
             });
 
-            let (codon, mojo) = join!(codon_handle, mojo_handle);
-            let codon_status = codon??;
-            let mojo_status = mojo??;
-
-            if codon_status.success() && mojo_status.success() {
-                println!("All preparations completed.");
-            } else {
-                anyhow::bail!("Some preparation tasks failed.");
-            }
+            let (mojo,) = join!(mojo_handle);
+            mojo??;
 
             Ok(())
         }
@@ -98,40 +71,31 @@ async fn main() -> Result<()> {
         Commands::Setup => {
             println!("Setting up Calgae dependencies...");
 
+            struct Dependency<'a> {
+                package_name: &'a str,
+                command: &'a str,
+                install_hint: &'a str,
+            }
+
             // Check base system dependencies
-            let base_deps = [
-                "build-essential",
-                "cmake",
-                "git",
-                "curl",
-                "wget",
-                "python3",
-                "python3-pip",
+            let base_deps = vec![
+                Dependency { package_name: "build-essential", command: "gcc", install_hint: "sudo apt install build-essential" },
+                Dependency { package_name: "cmake", command: "cmake", install_hint: "sudo apt install cmake" },
+                Dependency { package_name: "git", command: "git", install_hint: "sudo apt install git" },
+                Dependency { package_name: "curl", command: "curl", install_hint: "sudo apt install curl" },
+                Dependency { package_name: "wget", command: "wget", install_hint: "sudo apt install wget" },
+                Dependency { package_name: "python3", command: "python3", install_hint: "sudo apt install python3" },
+                Dependency { package_name: "python3-pip", command: "pip3", install_hint: "sudo apt install python3-pip" },
             ];
-            for &dep in &base_deps {
-                if dep == "build-essential" {
-                    // Check if gcc is available as proxy for build-essential
-                    if !is_command_available("gcc").await? {
-                        eprintln!(
-                            "Warning: GCC (build-essential) not found. Please install: sudo apt install build-essential"
-                        );
-                    }
-                } else {
-                    let cmd = match dep {
-                        "cmake" => "cmake",
-                        "git" => "git",
-                        "curl" => "curl",
-                        "wget" => "wget",
-                        "python3" => "python3",
-                        "python3-pip" => "pip3",
-                        _ => continue,
-                    };
-                    if !is_command_available(cmd).await? {
-                        eprintln!(
-                            "Warning: {} not found. Please install: sudo apt install {}",
-                            cmd, dep
-                        );
-                    }
+
+            for dep in &base_deps {
+                if !is_command_available(dep.command).await? {
+                    eprintln!(
+                        "Warning: Dependency '{}' (command: '{}') not found. Please install: {}",
+                        dep.package_name,
+                        dep.command,
+                        dep.install_hint
+                    );
                 }
             }
 
@@ -187,16 +151,6 @@ async fn main() -> Result<()> {
                 println!("Mojo is available.");
             }
 
-            // Codon setup
-            println!("Setting up Codon...");
-            let codon_install = AsyncCommand::new("pip3")
-                .args(["install", "codon"])
-                .status()
-                .await?;
-            if !codon_install.success() {
-                eprintln!("Warning: Codon installation failed. Run 'pip3 install codon' manually.");
-            }
-
             println!("Setup complete! Source env files as needed.");
             Ok(())
         }
@@ -205,7 +159,7 @@ async fn main() -> Result<()> {
             println!("Building all Calgae components...");
 
             let zig_build = AsyncCommand::new("bash")
-                .args(["-c", "cd runtime && zig build-exe src/runtime.zig"])
+                .args(["-c", "cd runtime/zig && zig build"])
                 .status()
                 .await?;
             if !zig_build.success() {
@@ -297,14 +251,6 @@ async fn main() -> Result<()> {
                 .await?;
             if awq.success() {
                 println!("AWQ quantization completed. Quantized model saved to ./models/tinyllama-awq");
-                // Copy to models dir if needed
-                let copy = AsyncCommand::new("cp")
-                    .args(["-r", "./models/tinyllama-awq", "./models/"])
-                    .status()
-                    .await?;
-                if copy.success() {
-                    println!("Copied quantized model to models/");
-                }
             } else {
                 anyhow::bail!("AWQ quantization failed. Check python3 and dependencies.");
             }

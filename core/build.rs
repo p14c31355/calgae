@@ -2,13 +2,37 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    // Build Mojo library
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    let zig_root = manifest_dir.join("../runtime/zig");
+
+    // Ensure target dir for Zig build
     let out_dir = PathBuf::from(env::var("OUT_DIR").unwrap());
+
+    // Re-enable the Zig build process
+    let target = std::env::var("TARGET").unwrap();
+    let zig_target = target.replace("-unknown", ""); // Remove -unknown for Zig compatibility
+
+    let status_zig = std::process::Command::new("zig")
+        .args(&["build", &format!("-Dtarget={}", zig_target), "-Doptimize=ReleaseSafe"])
+        .current_dir(&zig_root)
+        .status()
+        .expect("Failed to build Zig libs");
+    if !status_zig.success() {
+        panic!("Zig build failed");
+    }
+
+    // Link Zig libs (assuming zig-out/lib has lib*.a)
+    println!("cargo:rustc-link-search=native={}", zig_root.join("zig-out/lib").display());
+    println!("cargo:rustc-link-lib=static=runtime");
+    println!("cargo:rustc-link-lib=static=quantizer");
+
+    // Build Mojo AWQ library
     let mojo_out = out_dir.join("awq");
-    let status = std::process::Command::new("mojo")
+    let mojo_awq_path = manifest_dir.join("../ml/mojo/awq.mojo");
+    let status_mojo = std::process::Command::new("mojo")
         .args(&[
             "build",
-            "../ml/mojo/awq.mojo",
+            &mojo_awq_path.to_string_lossy(),
             "-o", &mojo_out.to_string_lossy(),
             "--emit", "shared-lib",
             "-O3"
@@ -16,11 +40,10 @@ fn main() {
         .status()
         .expect("Failed to build Mojo lib");
 
-    if !status.success() {
+    if !status_mojo.success() {
         panic!("Mojo build failed");
     }
 
-    // Link the generated lib (assuming it produces libawq.a or similar)
     let lib_filename = if cfg!(target_os = "windows") {
         "awq.dll"
     } else if cfg!(target_os = "macos") {
@@ -28,14 +51,16 @@ fn main() {
     } else {
         "libawq.so"
     };
-    let lib_path = out_dir.join(lib_filename);
+    let lib_path = mojo_out.join(lib_filename);
     if lib_path.exists() {
-        println!("cargo:rustc-link-search=native={}", out_dir.display());
+        println!("cargo:rustc-link-search=native={}", mojo_out.display());
         println!("cargo:rustc-link-lib=dylib=awq");
     } else {
         panic!("Mojo lib not found at expected path: {}", lib_path.display());
     }
 
-    // Ensure cc dependency is used if needed
-    println!("cargo:rerun-if-changed=../ml/mojo/awq.mojo");
+    // Rerun if changed
+    println!("cargo:rerun-if-changed=../core/src/");
+    println!("cargo:rerun-if-changed=../ml/mojo/");
+    println!("cargo:rerun-if-changed=../runtime/zig/src/");
 }
