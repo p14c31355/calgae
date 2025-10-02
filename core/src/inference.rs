@@ -195,7 +195,7 @@ impl LlmInference {
             unsafe { VarBuilder::from_mmaped_safetensors(&weights_ref, dtype, &device) }?
         };
 
-        let model = Arc::new(Llama::load(&mut vb, &config)?);
+        let model = Arc::new(Llama::load(vb, &config)?);
 
         let eos_token_id = tokenizer.token_to_id("</s>")
             .ok_or_else(|| anyhow!("EOS token '</s>' not found in tokenizer vocab"))? as u32;
