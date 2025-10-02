@@ -202,3 +202,29 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
 
     return -1; // Should be unreachable
 }
+
+pub export fn zig_quantize_model(model_path_c: [*:0]const u8, bits: u8) isize {
+    const model_path = std.mem.span(model_path_c);
+    std.log.info("Zig: Quantizing model {s} to {d} bits", .{ model_path, bits });
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    var worker = QuantWorker.init(allocator, 0); // Worker ID 0 for simplicity
+
+    // Derive output path (e.g., append "_quantized.bin")
+    var output_path_buf = std.ArrayList(u8).init(allocator);
+    defer output_path_buf.deinit();
+    output_path_buf.appendSlice(model_path) catch return -1;
+    output_path_buf.appendSlice("_quantized.bin") catch return -1;
+    const output_path = output_path_buf.toOwnedSlice() catch return -1;
+    defer allocator.free(output_path);
+
+    worker.run_quantization(model_path_c, bits, output_path.ptr) catch |err| {
+        std.log.err("Zig quantization failed: {s}", .{@errorName(err)});
+        return -1;
+    };
+
+    return 0; // Success
+}

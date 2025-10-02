@@ -3,7 +3,7 @@ use libc::c_float; // c_float を libc からインポート
 
 #[link(name = "quantizer")]
 unsafe extern "C" {
-    pub fn zig_quantize_model(model_path: *const c_char, bits: i32, output_path: *const c_char) -> i32;
+    pub fn zig_quantize_model(model_path: *const c_char, bits: u8) -> isize;
     pub fn zig_quantize_buffer(data: *const c_float, len: usize, bits: u8, output_buffer: *mut c_void, scale: *mut f32) -> isize;
 }
 

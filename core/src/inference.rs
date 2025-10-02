@@ -190,8 +190,6 @@ impl LlmInference {
 
                     // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
                     // For now, assuming the rest of the file is quantized data for this tensor
-                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
-                    file.read_exact(&mut len_bytes)?;
                     let mut shape_len_bytes = [0u8; 4];
                     file.read_exact(&mut shape_len_bytes)?;
                     let shape_len = u32::from_le_bytes(shape_len_bytes) as usize;
@@ -202,9 +200,9 @@ impl LlmInference {
                         shape.push(u64::from_le_bytes(dim_bytes) as usize);
                     }
 
-                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
-                    file.read_exact(&mut len_bytes)?;
-                    let data_len = u64::from_le_bytes(len_bytes) as usize;
+                    let mut data_len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                    file.read_exact(&mut data_len_bytes)?;
+                    let data_len = u64::from_le_bytes(data_len_bytes) as usize;
                     let mut quantized_data_buffer = vec![0; data_len];
                     file.read_exact(&mut quantized_data_buffer)?;
 
