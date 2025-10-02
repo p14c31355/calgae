@@ -91,7 +91,7 @@ impl LlmInference {
                     let res = unsafe {
                         zig_quantize_buffer(
                             tensor_data_f32.as_ptr(),
-                            num_elements as i32,
+                            num_elements,
                             bits,
                             output_buffer.as_mut_ptr() as *mut c_void,
                             &mut scale as *mut f32,
