@@ -100,6 +100,27 @@ fn compute_scale_c(
 
     return 0
 
+# Helper to swap elements in an UnsafePointer
+fn swap(data: UnsafePointer[Float32], i: Int, j: Int):
+    var temp : Float32 = data.load(i)
+    data.store(i, data.load(j))
+    data.store(j, temp)
+
+# QuickSort implementation for UnsafePointer[Float32] (descending order)
+fn quicksort_descending(data: UnsafePointer[Float32], low: Int, high: Int):
+    if low < high:
+        var pivot_val = data.load(high)
+        var i = low - 1
+        for j in range(low, high):
+            if data.load(j) >= pivot_val: # Descending order
+                i += 1
+                swap(data, i, j)
+        swap(data, i + 1, high)
+        var pivot_idx = i + 1
+
+        quicksort_descending(data, low, pivot_idx - 1)
+        quicksort_descending(data, pivot_idx + 1, high)
+
 # Compute SmoothQuant per-channel scales
 @export("compute_smoothquant_scales_c")
 fn compute_smoothquant_scales_c(
@@ -109,19 +130,12 @@ fn compute_smoothquant_scales_c(
     bits: Int,
     scales_out: UnsafePointer[Float32]
 ) -> Int:
-    # Collect and sort act_max descending
-    var act_list: List[Float32] = List[Float32]()
-    act_list.reserve(hidden_size)
+    # Collect act_max into a temporary buffer for sorting
+    var temp_act_max_buffer = UnsafePointer[Float32].alloc(hidden_size)
     for i in range(hidden_size):
-        act_list.append(act_max.load(i))
+        temp_act_max_buffer.store(i, act_max.load(i))
 
-    # Bubble sort descending (simple for hidden_size ~4096, or use selection sort)
-    for i in range(hidden_size):
-        for j in range(i + 1, hidden_size):
-            if act_list[i] < act_list[j]:
-                var temp = act_list[i]
-                act_list[i] = act_list[j]
-                act_list[j] = temp
+    quicksort_descending(temp_act_max_buffer, 0, hidden_size - 1)
 
     var num_outliers = Int(sparsity * Float32(hidden_size))
     var beta: Float32 = 0.85
@@ -132,9 +146,11 @@ fn compute_smoothquant_scales_c(
         scales_out.store(i, 1.0)
 
     if num_outliers > 0:
-        var outlier_max: Float32 = act_list[0]  # Largest after descending sort
+        var outlier_max: Float32 = temp_act_max_buffer.load(0)  # Largest after descending sort
         var scale_factor: Float32 = (outlier_max / beta) / qmax
         for i in range(num_outliers):
             scales_out.store(i, scale_factor)
+    
+    temp_act_max_buffer.free() # Free the temporary buffer
 
     return 0

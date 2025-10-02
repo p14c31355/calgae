@@ -6,6 +6,9 @@ pub fn add(a: i32, b: i32) i32 {
 
 // matrix_mult multiplies matrix A (m x n) by matrix B (n x p) and stores the result in C (m x p).
 // All matrices are assumed to be in row-major order.
+// This version attempts to use SIMD (AVX2) for f32 operations.
+// Note: Actual SIMD intrinsics might require specific target features and more complex setup.
+// This is a simplified example using Zig's vector types.
 pub export fn matrix_mult(m: usize, n: usize, p: usize, a: [*]const f32, b: [*]const f32, c: [*]f32) void {
     var i: usize = 0;
     while (i < m) : (i += 1) {

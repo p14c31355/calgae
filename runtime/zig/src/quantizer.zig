@@ -150,18 +150,20 @@ const QuantWorker = struct {
 };
 
 
-pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8, output_ptr: [*]u8, scale_ptr: *f32) isize {
+pub export fn zig_quantize_buffer(input_ptr: [*]const u8, num_elements: usize, bits: u8, output_ptr: [*]u8, scale_ptr: *f32) isize {
     if (bits != 4 and bits != 8) {
         std.log.err("Only 4-bit and 8-bit quantization supported", .{});
         return -1;
     }
-    if (num == 0) {
+    if (num_elements == 0) {
         return 0;
     }
 
-    const input = input_ptr[0..num];
+    // Reinterpret input_ptr as a slice of f32
+    const input_f32: []const f32 = @as([*]const f32, @ptrCast(input_ptr))[0..num_elements];
+
     var max_abs: f32 = 0.0;
-    for (input) |val| {
+    for (input_f32) |val| {
         const abs_val = if (val >= 0.0) val else -val;
         if (abs_val > max_abs) {
             max_abs = abs_val;
@@ -172,15 +174,15 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
     scale_ptr.* = scale;
 
     if (bits == 8) {
-        for (input, 0..) |val, i| {
+        for (input_f32, 0..) |val, i| {
             const dequant = @round(val / scale);
             const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -128, 127);
             output_ptr[i] = @as(u8, @bitCast(@as(i8, @intCast(clamped))));
         }
-        return @intCast(num);
+        return @intCast(num_elements);
     } else if (bits == 4) {
         var byte_idx: usize = 0;
-        for (input, 0..) |val, i| {
+        for (input_f32, 0..) |val, i| {
             const dequant = @round(val / scale);
             const clamped = std.math.clamp(@as(i32, @intFromFloat(dequant)), -8, 7); // 4-bit signed range
             const quantized_val_i8 = @as(i8, @intCast(clamped)); // Cast to i8 first
@@ -194,7 +196,7 @@ pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8,
             }
         }
         // Handle odd number of floats
-        if (num % 2 != 0) {
+        if (num_elements % 2 != 0) {
             byte_idx += 1;
         }
         return @intCast(byte_idx);

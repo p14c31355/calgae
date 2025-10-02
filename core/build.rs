@@ -27,21 +27,21 @@ fn main() {
     println!("cargo:rustc-link-lib=static=quantizer");
 
     // Build Mojo AWQ library
-    let mojo_out = out_dir.join("awq");
+    let mojo_awq_out = out_dir.join("awq");
     let mojo_awq_path = manifest_dir.join("../ml/mojo/awq.mojo");
-    let status_mojo = std::process::Command::new("mojo")
+    let status_mojo_awq = std::process::Command::new("mojo")
         .args(&[
             "build",
             &mojo_awq_path.to_string_lossy(),
-            "-o", &mojo_out.to_string_lossy(),
+            "-o", &mojo_awq_out.to_string_lossy(),
             "--emit", "shared-lib",
             "-O3"
         ])
         .status()
-        .expect("Failed to build Mojo lib");
+        .expect("Failed to build Mojo AWQ lib");
 
-    if !status_mojo.success() {
-        panic!("Mojo build failed");
+    if !status_mojo_awq.success() {
+        panic!("Mojo AWQ build failed");
     }
 
     let lib_filename = if cfg!(target_os = "windows") {
@@ -51,12 +51,12 @@ fn main() {
     } else {
         "libawq.so"
     };
-    let lib_path = mojo_out.join(lib_filename);
-    if lib_path.exists() {
-        println!("cargo:rustc-link-search=native={}", mojo_out.display());
+    let lib_awq_path = mojo_awq_out.join(lib_filename);
+    if lib_awq_path.exists() {
+        println!("cargo:rustc-link-search=native={}", mojo_awq_out.display());
         println!("cargo:rustc-link-lib=dylib=awq");
     } else {
-        panic!("Mojo lib not found at expected path: {}", lib_path.display());
+        panic!("Mojo AWQ lib not found at expected path: {}", lib_awq_path.display());
     }
 
     // Rerun if changed
