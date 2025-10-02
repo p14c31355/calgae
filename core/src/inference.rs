@@ -21,19 +21,10 @@ use std::fs::File;
 
 use rand::prelude::*;
 
-use std::collections::{BinaryHeap, HashSet};
-use std::cmp::Reverse;
 use foreign_types::ForeignTypeRef;
-
-use candle_core::safetensors::MmapedSafetensors;
-
-extern "C" {
-    fn zig_quantize_buffer(input: *const f32, num: i32, bits: u8, output: *mut u8, scale: *mut f32) -> i32;
-}
-
-extern "C" {
-    fn zig_quantize_model(model_path: *const c_char, bits: i32, output_path: *const c_char) -> i32;
-}
+use candle_core::safetensors::{SafeTensors, MmapedSafetensors};
+use crate::zig_ffi::{zig_quantize_buffer, zig_quantize_model}; // zig_ffi からインポート
+use candle_transformers::generation::LogitsProcessor;
 
 #[derive(Error, Debug)]
 pub enum InferenceError {
@@ -67,7 +58,7 @@ impl LlmInference {
 
         // Optional quantization using Zig
         if let Some(bits) = quantize_bits {
-            let safetensors_files: Vec<PathBuf> = fs::read_dir(model_path)?
+            let safetensors_files: Vec<PathBuf> = fs::read_dir(&model_path)?
                 .filter_map(Result::ok)
                 .filter(|e| e.path().extension().map_or(false, |s| s == "safetensors"))
                 .map(|e| e.path())
@@ -75,26 +66,51 @@ impl LlmInference {
             if safetensors_files.is_empty() {
                 return Err(anyhow!("No safetensors files found in model directory"));
             }
+
             let quantized_dir = model_path.join(format!("quantized_{}", bits));
             fs::create_dir_all(&quantized_dir)?;
-            let mut quantize_success = true;
+
             for file in safetensors_files {
+                info!("Quantizing file: {}", file.display());
+                let mmaped = unsafe { MmapedSafetensors::new(&file)? };
+                let tensors = mmaped.tensors();
+
                 let file_name = file.file_name().ok_or(anyhow!("Invalid file name"))?.to_str().ok_or(anyhow!("Invalid UTF-8 file name"))?;
-                let quantized_file = quantized_dir.join(format!("{}_{}.bin", file_name.strip_suffix(".safetensors").unwrap_or(file_name), bits));
-                let file_path_str = file.to_str().ok_or(anyhow!("Invalid file path"))?;
-                let output_path_str = quantized_file.to_str().ok_or(anyhow!("Invalid output path"))?;
-                let c_path = CString::new(file_path_str)?;
-                let c_output = CString::new(output_path_str)?;
-                let res = unsafe { zig_quantize_model(c_path.as_ptr(), bits as i32, c_output.as_ptr()) };
-                if res < 0 {
-                    quantize_success = false;
-                    error!("Zig quantization failed for {}", file.display());
-                } else {
-                    info!("File {} quantized to {} bits at {}", file.display(), bits, output_path_str);
+                let quantized_output_path = quantized_dir.join(format!("{}_{}.bin", file_name.strip_suffix(".safetensors").unwrap_or(file_name), bits));
+                let mut output_file = File::create(&quantized_output_path)?;
+
+                for (tensor_name, tensor_info) in tensors.iter() {
+                    let tensor_data = mmaped.load_tensor(tensor_info, &device)?;
+                    let tensor_data_f32 = tensor_data.to_dtype(DType::F32)?.to_vec1::<f32>()?;
+
+                    let num_elements = tensor_data_f32.len();
+                    let output_buffer_size = (num_elements * bits as usize + 7) / 8; // Calculate buffer size for quantized data
+                    let mut output_buffer = vec![0u8; output_buffer_size];
+                    let mut scale: f32 = 0.0;
+
+                    let res = unsafe {
+                        zig_quantize_buffer(
+                            tensor_data_f32.as_ptr(),
+                            num_elements as i32,
+                            bits,
+                            output_buffer.as_mut_ptr() as *mut c_void,
+                            &mut scale as *mut f32,
+                        )
+                    };
+
+                    if res < 0 {
+                        error!("Zig quantization failed for tensor {} in file {}", tensor_name, file.display());
+                        return Err(anyhow!("Zig quantization failed for tensor {}", tensor_name));
+                    } else {
+                        // Write tensor name length, name, scale, and quantized data to the output file
+                        output_file.write_all(&(tensor_name.len() as u32).to_le_bytes())?;
+                        output_file.write_all(tensor_name.as_bytes())?;
+                        output_file.write_all(&scale.to_le_bytes())?;
+                        output_file.write_all(&output_buffer[..res as usize])?;
+                        info!("Tensor {} quantized to {} bits, scale: {}", tensor_name, bits, scale);
+                    }
                 }
-            }
-            if !quantize_success {
-                return Err(anyhow!("Zig quantization failed for one or more files"));
+                info!("File {} quantized to {} bits at {}", file.display(), bits, quantized_output_path.display());
             }
             model_path = quantized_dir; // Use quantized directory
         }
@@ -153,9 +169,25 @@ impl LlmInference {
             // Custom loader for quantized .bin files
             let mut tensors = std::collections::HashMap::new();
             for file_path in weights {
-                let tensor_name = file_path.file_stem().ok_or(anyhow!("Invalid file name"))?.to_str().ok_or(anyhow!("Invalid UTF-8 file name"))?.to_string();
-                let dequantized_tensor = Self::load_quantized_tensor(&file_path, bits, &device)?;
-                tensors.insert(tensor_name, dequantized_tensor);
+                let mut file = File::open(&file_path)?;
+                while let Ok(name_len_bytes) = file.read_exact(&mut [0u8; 4]) {
+                    let name_len = u32::from_le_bytes(name_len_bytes) as usize;
+                    let mut name_bytes = vec![0u8; name_len];
+                    file.read_exact(&mut name_bytes)?;
+                    let tensor_name = String::from_utf8(name_bytes)?;
+
+                    let mut scale_bytes = [0u8; 4];
+                    file.read_exact(&mut scale_bytes)?;
+                    let scale = f32::from_le_bytes(scale_bytes);
+
+                    // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
+                    // For now, assuming the rest of the file is quantized data for this tensor
+                    let mut quantized_data_buffer = Vec::new();
+                    file.read_to_end(&mut quantized_data_buffer)?;
+
+                    let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device)?;
+                    tensors.insert(tensor_name, dequantized_tensor);
+                }
             }
             VarBuilder::from_tensors(tensors, dtype, &device)
         } else {
@@ -207,10 +239,14 @@ impl LlmInference {
         let logits = logits.squeeze(0)?.to_dtype(DType::F32)?;
 
         let mut generated_tokens = vec![];
-        let vocab_size = self.config.vocab_size;
+        let mut logits_processor = LogitsProcessor::new(0, Some(temperature), Some(top_p)); // seed は適当な値 (0) を設定
+        if top_k > 0 {
+            logits_processor.top_k = Some(top_k);
+        }
+
         let last_pos = Tensor::new(&[(prompt_len - 1) as i64], &self.device)?;
         let next_token_logits = logits.index_select(&last_pos, 0usize)?.squeeze(0)?.to_dtype(DType::F32)?;
-        let next_token = Self::sample_token(&next_token_logits, temperature, top_k, top_p, vocab_size, &self.device)?;
+        let next_token = logits_processor.sample(&next_token_logits)?;
         generated_tokens.push(next_token);
         tokens.push(next_token);
 
@@ -228,7 +264,7 @@ impl LlmInference {
             let logits = self.model.forward(&input, position, &mut cache)?;
             let next_token_logits = logits.squeeze(0)?.squeeze(0)?.to_dtype(DType::F32)?;
 
-            let next_token = Self::sample_token(&next_token_logits, temperature, top_k, top_p, vocab_size, &self.device)?;
+            let next_token = logits_processor.sample(&next_token_logits)?;
             generated_tokens.push(next_token);
             tokens.push(next_token);
             position += 1;
@@ -250,88 +286,7 @@ impl LlmInference {
         Ok(response)
     }
 
-    fn sample_token(
-        logits: &Tensor,
-        temperature: f32,
-        top_k: usize,
-        top_p: f32,
-        vocab_size: usize,
-        device: &Device,
-    ) -> Result<u32> {
-        let logits = logits.to_dtype(DType::F32)?;
-
-        if temperature <= 0.0 {
-            let max_idx = logits.argmax(0)?.to_scalar::<u32>()?;
-            return Ok(max_idx);
-        }
-
-        let logits = logits.div(temperature)?;
-
-        let probs = candle_nn::ops::softmax(&logits, 0)?;
-
-        let mut filtered_indices: Vec<u32> = (0..vocab_size as u32).collect();
-        let mut filtered_probs = probs.to_vec1::<f32>()?;
-
-        // Top-k filtering
-        if top_k > 0 && top_k < vocab_size {
-            let (sorted_probs, sorted_indices) = probs.sort_values_with_indices(0, false)?; // descending
-            let sorted_probs_vec = sorted_probs.to_vec1::<f32>()?;
-            let sorted_indices_vec = sorted_indices.to_vec1::<u32>()?;
-
-            filtered_indices.clear();
-            filtered_probs.clear();
-
-            for i in 0..top_k {
-                filtered_indices.push(sorted_indices_vec[i]);
-                filtered_probs.push(sorted_probs_vec[i]);
-            }
-        }
-
-        // Top-p filtering
-        if top_p < 1.0 {
-            let mut indexed_probs: Vec<(f32, u32)> = filtered_probs.iter().zip(filtered_indices.iter()).map(|(&p, &i)| (p, i)).collect();
-            indexed_probs.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal)); // descending
-
-            let mut cumsum = 0.0;
-            let mut cutoff_idx = 0;
-            for (prob, _) in indexed_probs.iter() {
-                cumsum += *prob;
-                cutoff_idx += 1;
-                if cumsum > top_p {
-                    break;
-                }
-            }
-
-            filtered_indices = indexed_probs[..cutoff_idx].iter().map(|(_, i)| *i).collect();
-            filtered_probs = indexed_probs[..cutoff_idx].iter().map(|(p, _)| *p).collect();
-
-            // Re-normalize probabilities after filtering
-            let sum_filtered_probs: f32 = filtered_probs.iter().sum();
-            if sum_filtered_probs > 0.0 {
-                for p in filtered_probs.iter_mut() {
-                    *p /= sum_filtered_probs;
-                }
-            } else {
-                // Fallback if all probabilities are filtered out
-                return Ok(thread_rng().gen_range(0..vocab_size) as u32);
-            }
-        }
-
-        // Sample from filtered and re-normalized probabilities
-        let probs_tensor = Tensor::new(&filtered_probs, device)?;
-        let sample_idx = probs_tensor.multinomial(1, true)?.to_scalar::<u32>()?;
-        Ok(filtered_indices[sample_idx as usize])
-    }
-
-    fn load_quantized_tensor(path: &Path, bits: u8, device: &Device) -> Result<Tensor> {
-        let mut file = File::open(path)?;
-        let mut scale_bytes = [0u8; 4];
-        file.read_exact(&mut scale_bytes)?;
-        let scale = f32::from_le_bytes(scale_bytes);
-
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
+    fn load_quantized_tensor_from_buffer(buffer: &[u8], bits: u8, scale: f32, device: &Device) -> Result<Tensor> {
         let num_elements = if bits == 4 {
             buffer.len() * 2
         } else {

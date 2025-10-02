@@ -63,12 +63,19 @@ pub export fn zig_tcp_connect(host_ptr: [*:0]const u8, port: u16) i32 {
 }
 
 
-pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*anyopaque) isize {
+pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*anyopaque, arg: ?*anyopaque) ?*anyopaque {
     if (builtin.os.tag == .linux or builtin.os.tag == .macos or builtin.os.tag == .freestanding) {
-        var native: pthread.pthread_t = undefined;
-        const rc = pthread.pthread_create(&native, null, entry_fn, null);
-        if (rc != 0) return -1;
-        return @bitCast(@as(c_ulong, @intCast(native)));
+        const thread_handle_ptr = std.heap.page_allocator.alloc(pthread.pthread_t, 1) catch {
+            std.log.err("Failed to allocate memory for pthread_t", .{});
+            return null;
+        };
+        const rc = pthread.pthread_create(thread_handle_ptr, null, entry_fn, arg);
+        if (rc != 0) {
+            std.heap.page_allocator.free(thread_handle_ptr);
+            std.log.err("Failed to create pthread: {d}", .{rc});
+            return null;
+        }
+        return thread_handle_ptr;
     } else if (builtin.os.tag == .windows) {
         // TODO: Implement Windows threading using CreateThread
         @compileError("Windows threading not yet implemented.");
@@ -77,10 +84,20 @@ pub export fn zig_spawn_thread(entry_fn: *const fn(?*anyopaque) callconv(.c) ?*a
     }
 }
 
-pub export fn zig_join_thread(handle_: isize) void {
+pub export fn zig_join_thread(thread_handle: ?*anyopaque) i32 {
     if (builtin.os.tag == .linux or builtin.os.tag == .macos or builtin.os.tag == .freestanding) {
-        const native = @as(pthread.pthread_t, @as(c_ulong, @intCast(handle_)));
-        _ = pthread.pthread_join(native, null);
+        if (thread_handle == null) {
+            std.log.err("Attempted to join a null thread handle", .{});
+            return -1;
+        }
+        const thread_handle_ptr: *pthread.pthread_t = @ptrCast(thread_handle);
+        const rc = pthread.pthread_join(thread_handle_ptr.*, null);
+        std.heap.page_allocator.free(thread_handle_ptr);
+        if (rc != 0) {
+            std.log.err("Failed to join pthread: {d}", .{rc});
+            return -1;
+        }
+        return 0;
     } else if (builtin.os.tag == .windows) {
         // TODO: Implement Windows threading using WaitForSingleObject
         @compileError("Windows threading not yet implemented.");

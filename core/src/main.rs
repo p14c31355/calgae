@@ -73,7 +73,8 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
             let input_block = Paragraph::new(Line::raw(input_text))
                 .block(Block::default()
                     .title("Type your task")
-                    .borders(Borders::ALL));
+                    .borders(Borders::ALL)
+                    .border_style(if execute { Style::new().fg(Color::Red) } else { Style::default() }));
             f.render_widget(input_block, chunks[2]);
             f.set_cursor(chunks[2].x + input.len() as u16 + 8, chunks[2].y + 1); // Set cursor in input
         })?;
