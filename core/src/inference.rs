@@ -107,7 +107,7 @@ impl LlmInference {
                         output_file.write_all(&(tensor_name.len() as u32).to_le_bytes())?;
                         output_file.write_all(tensor_name.as_bytes())?;
                         output_file.write_all(&scale.to_le_bytes())?;
-                        output_file.write_all(&data_len.to_le_bytes())?;
+                        output_file.write_all(&(data_len as u64).to_le_bytes())?;
                         output_file.write_all(&output_buffer[..data_len])?;
                         info!("Tensor {} quantized to {} bits, scale: {}", tensor_name, bits, scale);
                     }
