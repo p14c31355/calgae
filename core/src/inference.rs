@@ -330,15 +330,17 @@ impl LlmInference {
             }
         } else if bits == 4 {
             for &byte in buffer.iter() {
-                let lower_nibble = (byte & 0x0F);
-                let upper_nibble = ((byte >> 4) & 0x0F);
+                let lower_nibble = byte & 0x0F;
+                let upper_nibble = (byte >> 4) & 0x0F;
 
                 // Convert 4-bit unsigned to 4-bit signed, then to f32
                 let val1 = if lower_nibble > 7 { lower_nibble as i8 - 16 } else { lower_nibble as i8 } as f32 * scale;
-                let val2 = if upper_nibble > 7 { upper_nibble as i8 - 16 } else { upper_nibble as i8 } as f32 * scale;
-
                 dequantized_data.push(val1);
-                dequantized_data.push(val2);
+
+                if dequantized_data.len() < num_elements {
+                    let val2 = if upper_nibble > 7 { upper_nibble as i8 - 16 } else { upper_nibble as i8 } as f32 * scale;
+                    dequantized_data.push(val2);
+                }
             }
         } else {
             return Err(anyhow!("Unsupported quantization bits: {}", bits));
