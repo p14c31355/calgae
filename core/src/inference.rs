@@ -165,7 +165,7 @@ impl LlmInference {
         }
 
 
-        let vb = if let Some(bits) = quantize_bits {
+        let mut vb = if let Some(bits) = quantize_bits {
             // Custom loader for quantized .bin files
             let mut tensors = std::collections::HashMap::new();
             for file_path in weights {
@@ -183,7 +183,11 @@ impl LlmInference {
                     // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
                     // For now, assuming the rest of the file is quantized data for this tensor
                     let mut quantized_data_buffer = Vec::new();
-                    file.read_to_end(&mut quantized_data_buffer)?;
+                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                    file.read_exact(&mut len_bytes)?;
+                    let data_len = usize::from_le_bytes(len_bytes);
+                    quantized_data_buffer.resize(data_len, 0);
+                    file.read_exact(&mut quantized_data_buffer)?;
 
                     let dequantized_tensor = Self::load_quantized_tensor_from_buffer(&quantized_data_buffer, bits, scale, &device)?;
                     tensors.insert(tensor_name, dequantized_tensor);

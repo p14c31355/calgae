@@ -149,22 +149,6 @@ const QuantWorker = struct {
     }
 };
 
-pub export fn zig_quantize_model(model_path: [*:0]const u8, bits_int: i32, output_path: [*:0]const u8) i32 {
-    const allocator = std.heap.page_allocator;
-    if (bits_int != 4 and bits_int != 8) {
-        std.log.err("Unsupported bits: {}", .{bits_int});
-        return -1;
-    }
-    const quant_bits: u8 = @intCast(bits_int);
-
-    var worker = QuantWorker.init(allocator, 0);
-    worker.run_quantization(model_path, quant_bits, output_path) catch |err| {
-        std.log.err("Quantization failed: {s}", .{@errorName(err)});
-        return -1;
-    };
-
-    return 0;
-}
 
 pub export fn zig_quantize_buffer(input_ptr: [*]const f32, num: usize, bits: u8, output_ptr: [*]u8, scale_ptr: *f32) isize {
     if (bits != 4 and bits != 8) {

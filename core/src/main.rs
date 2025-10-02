@@ -92,16 +92,15 @@ async fn tui_app(agent: Arc<Agent>, tokens: usize, execute: bool) -> AnyhowResul
                             // Safely extract and execute suggested command only
                             if let Some(pos) = response.find("Suggested command: ") {
                                 let cmd_start = pos + 18; // length of "Suggested command: "
-                                if let Some(cmd_end) = response[cmd_start..].find('\n') {
-                                    let cmd = response[cmd_start..cmd_start + cmd_end].trim().to_string();
+                                    let cmd_part = &response[cmd_start..];
+                                    let cmd = cmd_part.lines().next().unwrap_or(cmd_part).trim().to_string();
                                     if !cmd.is_empty() {
                                         println!("Executing suggested command: {}", cmd);
                                         tokio::process::Command::new("sh").arg("-c").arg(&cmd).status().await?;
                                     }
                                 }
                             }
-                        }
-                    }
+                    } // KeyCode::Enter の閉じ括弧
                 }
                 KeyCode::Char(c) => input.push(c),
                 KeyCode::Backspace => { input.pop(); }
