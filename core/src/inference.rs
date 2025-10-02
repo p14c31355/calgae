@@ -122,13 +122,16 @@ impl LlmInference {
                     // Apply SmoothQuant scales if enabled (absorb activation outliers into weights per channel)
                     if let Some(ref sq_scales) = scales {
                         let hidden_size = sq_scales.len();
-                        for i in 0..tensor_data_f32.len() {
-                            let channel = i % hidden_size;
-                            if sq_scales[channel] != 0.0 {
-                                tensor_data_f32[i] /= sq_scales[channel];
+                        // Heuristic: Apply scales only to tensors where the last dimension matches hidden_size.
+                        if tensor_data.dims().last() == Some(&hidden_size) {
+                            for i in 0..tensor_data_f32.len() {
+                                let channel = i % hidden_size;
+                                if sq_scales[channel] != 0.0 {
+                                    tensor_data_f32[i] /= sq_scales[channel];
+                                }
                             }
+                            info!("Applied SmoothQuant scales to tensor {}", tensor_name);
                         }
-                        info!("Applied SmoothQuant scales to tensor {}", tensor_name);
                     }
 
                     let num_elements = tensor_data_f32.len();
