@@ -185,9 +185,9 @@ impl LlmInference {
                     // Read quantized data (this part needs to be adjusted based on how zig_quantize_buffer saves data)
                     // For now, assuming the rest of the file is quantized data for this tensor
                     let mut quantized_data_buffer = Vec::new();
-                    let mut len_bytes = [0u8; 8]; // Assuming usize is 8 bytes
+                    let mut len_bytes = [0u8; 8];
                     file.read_exact(&mut len_bytes)?;
-                    let data_len = usize::from_le_bytes(len_bytes);
+                    let data_len = u64::from_le_bytes(len_bytes) as usize;
                     quantized_data_buffer.resize(data_len, 0);
                     file.read_exact(&mut quantized_data_buffer)?;
 
